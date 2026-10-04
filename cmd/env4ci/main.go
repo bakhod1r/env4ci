@@ -43,6 +43,7 @@ Usage:
   current branch mapped through "branches:" in env4ci.yaml.
   env4ci gen                        from env4ci.yaml: create .env.env4ci (tokens) and one
                                     .env file per environment with keys CI uses
+  env4ci makefile                   add/refresh env4ci targets in ./Makefile (make env-push ...)
   env4ci verify                     log in with SSH keys / registry tokens from the .env file
   env4ci scan                       list variables CI files expect; --write creates .env examples
   env4ci version
@@ -178,6 +179,8 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	switch cmd {
 	case "gen":
 		return cmdGen(cfg, o, out)
+	case "makefile":
+		return writeMakefile(filepath.Join(filepath.Dir(o.config), "Makefile"), out)
 	case "validate":
 		local, err := loadLocal(cfg, o)
 		if err != nil {

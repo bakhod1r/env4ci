@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -261,6 +262,9 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 		return err
 	}
 	if err := cmdGen(cfg, o, out); err != nil {
+		return err
+	}
+	if err := writeMakefile(filepath.Join(filepath.Dir(o.config), "Makefile"), out); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, ui.Dim("next: put tokens in "+cfg.AuthPath()+", fill the environment files, then run \"env4ci diff\""))
