@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
@@ -77,5 +79,22 @@ func TestPlanRejectsInvalidKey(t *testing.T) {
 	s := Service{Provider: &fakeProvider{store: map[string]domain.Remote{}}}
 	if _, err := s.Plan(context.Background(), []domain.Variable{{Key: "BAD-KEY"}}); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+type validatingProvider struct{ fakeProvider }
+
+func (validatingProvider) Validate(v domain.Variable) error {
+	if v.Value == "" {
+		return errors.New(v.Key + " empty")
+	}
+	return nil
+}
+
+func TestPlanRunsProviderValidationForAllKeys(t *testing.T) {
+	p := &validatingProvider{fakeProvider{store: map[string]domain.Remote{}}}
+	_, err := Service{Provider: p}.Plan(context.Background(), []domain.Variable{{Key: "A"}, {Key: "B", Value: "ok"}, {Key: "C"}})
+	if err == nil || !strings.Contains(err.Error(), "A empty") || !strings.Contains(err.Error(), "C empty") {
+		t.Fatalf("err = %v", err)
 	}
 }

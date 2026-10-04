@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io"
 	"io/fs"
@@ -77,7 +78,7 @@ func TestPushAbortWithoutConfirm(t *testing.T) {
 	cfg := filepath.Join(dir, "env4ci.yaml")
 	os.WriteFile(cfg, []byte("targets:\n  gitlab:\n    project: g/p\n    base_url: "+srv.URL+"\n"), 0o600)
 	env := filepath.Join(dir, ".env")
-	os.WriteFile(env, []byte("A=1\n"), 0o600)
+	os.WriteFile(env, []byte("APP_A=1\n"), 0o600)
 	t.Setenv("GITLAB_TOKEN", "tok")
 	err := run(context.Background(), []string{"push", "gitlab", "-c", cfg, "-f", env}, strings.NewReader("n\n"), io.Discard)
 	if err == nil || err.Error() != "aborted" {
@@ -219,5 +220,50 @@ b:
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Fatalf("%s missing:\n%s", f, out.String())
 		}
+	}
+}
+
+func TestDiffExitCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[{"key":"APP_PORT","value":"8080","environment_scope":"*"}]`)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "env4ci.yaml")
+	os.WriteFile(cfg, []byte("targets:\n  gitlab:\n    project: g/p\n    base_url: "+srv.URL+"\n"), 0o600)
+	same := filepath.Join(dir, "same.env")
+	os.WriteFile(same, []byte("APP_PORT=8080\n"), 0o600)
+	drift := filepath.Join(dir, "drift.env")
+	os.WriteFile(drift, []byte("APP_PORT=9090\n"), 0o600)
+	t.Setenv("GITLAB_TOKEN", "tok")
+
+	if err := run(context.Background(), []string{"diff", "gitlab", "-c", cfg, "-f", same, "--exit-code"}, nil, io.Discard); err != nil {
+		t.Fatalf("no drift: %v", err)
+	}
+	if err := run(context.Background(), []string{"diff", "gitlab", "-c", cfg, "-f", drift, "--exit-code"}, nil, io.Discard); !errors.Is(err, errDrift) {
+		t.Fatalf("drift: %v", err)
+	}
+	if err := run(context.Background(), []string{"diff", "gitlab", "-c", cfg, "-f", drift}, nil, io.Discard); err != nil {
+		t.Fatalf("without flag: %v", err)
+	}
+}
+
+func TestPushRejectsShortGitLabSecretBeforeWriting(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected write %s %s", r.Method, r.URL.Path)
+		}
+		io.WriteString(w, `[]`)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "env4ci.yaml")
+	os.WriteFile(cfg, []byte("targets:\n  gitlab:\n    project: g/p\n    base_url: "+srv.URL+"\n"), 0o600)
+	env := filepath.Join(dir, ".env")
+	os.WriteFile(env, []byte("APP_PORT=1\nJWT_SECRET=short\n"), 0o600)
+	t.Setenv("GITLAB_TOKEN", "tok")
+	err := run(context.Background(), []string{"push", "gitlab", "-c", cfg, "-f", env, "-y"}, nil, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "at least 8") {
+		t.Fatalf("err = %v", err)
 	}
 }

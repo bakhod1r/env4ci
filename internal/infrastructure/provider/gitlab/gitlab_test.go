@@ -63,3 +63,25 @@ func TestClientFlow(t *testing.T) {
 		t.Fatalf("delete scope = %q", deleteQuery)
 	}
 }
+
+func TestValidateMasked(t *testing.T) {
+	for v, ok := range map[string]bool{"12345678": true, "short": false, "line1\nline2long": false} {
+		if err := ValidateMasked("K", v); (err == nil) != ok {
+			t.Errorf("ValidateMasked(%q) = %v", v, err)
+		}
+	}
+}
+
+func TestShortSecretRejectedBeforeHTTP(t *testing.T) {
+	c := &Client{Project: "p", Token: "t", HTTP: doerFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unexpected HTTP call")
+		return nil, nil
+	})}
+	if err := c.Set(context.Background(), domain.Variable{Key: "K", Value: "abc", Kind: domain.KindSecret}); err == nil {
+		t.Fatal("want error")
+	}
+}
+
+type doerFunc func(*http.Request) (*http.Response, error)
+
+func (f doerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/httpx"
 )
 
 const DefaultBaseURL = "https://gitlab.com"
@@ -23,7 +25,7 @@ type Client struct {
 	Project     string // numeric id or group/project path
 	Environment string // environment_scope; empty = "*"
 	Protected   bool
-	HTTP        *http.Client
+	HTTP        Doer // nil = httpx.New()
 }
 
 func (c *Client) Name() string { return "gitlab:" + c.Project + "@" + c.scope() }
@@ -72,7 +74,34 @@ func (c *Client) List(ctx context.Context) ([]domain.Remote, error) {
 	}
 }
 
+// MinMaskedLength is GitLab's minimum length for a masked variable.
+const MinMaskedLength = 8
+
+// ValidateMasked reports values GitLab refuses to mask, before any API call.
+func ValidateMasked(key, value string) error {
+	switch {
+	case len(value) < MinMaskedLength:
+		return fmt.Errorf("gitlab: secret %s must be at least %d characters to be masked; make it longer or classify it as a variable", key, MinMaskedLength)
+	case strings.ContainsAny(value, "\n\r"):
+		return fmt.Errorf("gitlab: secret %s is multi-line and cannot be masked; base64-encode it or classify it as a variable", key)
+	}
+	return nil
+}
+
+// Validate implements application.Validator.
+func (c *Client) Validate(v domain.Variable) error {
+	if v.Kind == domain.KindSecret {
+		return ValidateMasked(v.Key, v.Value)
+	}
+	return nil
+}
+
 func (c *Client) Set(ctx context.Context, v domain.Variable) error {
+	if v.Kind == domain.KindSecret {
+		if err := ValidateMasked(v.Key, v.Value); err != nil {
+			return err
+		}
+	}
 	body := variable{
 		Key: v.Key, Value: v.Value,
 		Masked:           v.Kind == domain.KindSecret,
@@ -90,6 +119,11 @@ func (c *Client) Delete(ctx context.Context, key string, _ domain.Kind) error {
 	return c.do(ctx, http.MethodDelete, c.keyPath(key), nil, nil)
 }
 
+// Doer sends HTTP requests; *httpx.Client and *http.Client satisfy it.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type apiError struct {
 	Status int
 	Msg    string
@@ -98,8 +132,8 @@ type apiError struct {
 func (e *apiError) Error() string { return fmt.Sprintf("gitlab: HTTP %d: %s", e.Status, e.Msg) }
 
 func isNotFound(err error) bool {
-	e, ok := err.(*apiError)
-	return ok && e.Status == http.StatusNotFound
+	var e *apiError
+	return errors.As(err, &e) && e.Status == http.StatusNotFound
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
@@ -123,11 +157,10 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	hc := c.HTTP
-	if hc == nil {
-		hc = http.DefaultClient
+	if c.HTTP == nil {
+		c.HTTP = httpx.New()
 	}
-	resp, err := hc.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
 	}

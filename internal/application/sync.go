@@ -4,6 +4,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
@@ -17,6 +18,13 @@ type Provider interface {
 	Delete(ctx context.Context, key string, kind domain.Kind) error
 }
 
+// Validator is optionally implemented by providers that can reject a value
+// before any write (size limits, masking rules). Plan calls it for every
+// variable, so a push never stops halfway on a value the provider refuses.
+type Validator interface {
+	Validate(v domain.Variable) error
+}
+
 // Service runs plan/apply/pull against one provider target.
 type Service struct {
 	Provider Provider
@@ -27,6 +35,17 @@ func (s Service) Plan(ctx context.Context, local []domain.Variable) (domain.Plan
 	for _, v := range local {
 		if err := domain.ValidateKey(v.Key); err != nil {
 			return domain.Plan{}, err
+		}
+	}
+	if val, ok := s.Provider.(Validator); ok {
+		var errs []error
+		for _, v := range local {
+			if err := val.Validate(v); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			return domain.Plan{}, errors.Join(errs...)
 		}
 	}
 	remote, err := s.Provider.List(ctx)

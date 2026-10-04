@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/nacl/box"
@@ -40,7 +41,9 @@ func TestClientFlow(t *testing.T) {
 	mux.HandleFunc("GET /repos/o/r/environments/prod/variables", func(w http.ResponseWriter, _ *http.Request) {
 		io.WriteString(w, `{"total_count":1,"variables":[{"name":"V","value":"1"}]}`)
 	})
+	keyFetches := 0
 	mux.HandleFunc("GET /repos/o/r/environments/prod/secrets/public-key", func(w http.ResponseWriter, _ *http.Request) {
+		keyFetches++
 		json.NewEncoder(w).Encode(map[string]string{"key_id": "k1", "key": base64.StdEncoding.EncodeToString(pub[:])})
 	})
 	mux.HandleFunc("PUT /repos/o/r/environments/prod/secrets/S", func(w http.ResponseWriter, r *http.Request) {
@@ -80,10 +83,32 @@ func TestClientFlow(t *testing.T) {
 		t.Fatalf("bad secret body %v", secretBody)
 	}
 
+	if err := c.Set(ctx, domain.Variable{Key: "S", Value: "pw2", Kind: domain.KindSecret}); err != nil {
+		t.Fatal(err)
+	}
+	if keyFetches != 1 {
+		t.Fatalf("public key fetched %d times, want 1", keyFetches)
+	}
+
 	if err := c.Set(ctx, domain.Variable{Key: "NEW", Value: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 2 || calls[1] != "post" {
 		t.Fatalf("calls = %v", calls)
 	}
+}
+
+func TestSecretTooLarge(t *testing.T) {
+	c := &Client{Repo: "o/r", Token: "t", HTTP: failDoer{t}}
+	err := c.Set(context.Background(), domain.Variable{Key: "BIG", Value: strings.Repeat("x", MaxSecretSize+1), Kind: domain.KindSecret})
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type failDoer struct{ t *testing.T }
+
+func (f failDoer) Do(*http.Request) (*http.Response, error) {
+	f.t.Fatal("unexpected HTTP call")
+	return nil, nil
 }

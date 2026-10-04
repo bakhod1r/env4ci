@@ -4,8 +4,17 @@
 
 Sync environment variables and secrets between local `.env` files, **GitHub Actions** and **GitLab CI/CD**.
 
+[![ci](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml/badge.svg)](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml)
+
 ```bash
 go install github.com/bakhod1r/env4ci/cmd/env4ci@latest
+```
+
+Or download a binary (Linux, macOS, Windows; amd64/arm64) from [Releases](https://github.com/bakhod1r/env4ci/releases).
+Each release has `checksums.txt` and a GitHub build provenance attestation:
+
+```bash
+gh attestation verify env4ci_*_linux_amd64.tar.gz --repo bakhod1r/env4ci
 ```
 
 ## Usage
@@ -58,6 +67,31 @@ github:bakhod1r/my-api@production
 ```
 
 `?` = GitHub secrets are write-only, so env4ci cannot compare them and re-writes them on push.
+
+## CI drift check
+
+```yaml
+- run: env4ci diff github -e production --exit-code   # exit 2 if remote differs from .env.production
+  env:
+    GITHUB_TOKEN: ${{ secrets.ENV4CI_TOKEN }}
+```
+
+Exit codes: `0` ok, `1` error, `2` drift (`--exit-code`).
+
+## Authentication
+
+| Provider | Token | Scope |
+|----------|-------|-------|
+| GitHub | `GITHUB_TOKEN` / `GH_TOKEN`, else `gh auth token` | fine-grained: *Secrets* + *Variables* read/write (+ *Environments* read) |
+| GitLab | `GITLAB_TOKEN` | `api`, Maintainer role |
+
+Self-hosted: `targets.github.base_url` (GHES `https://host/api/v3`), `targets.gitlab.base_url` or `GITLAB_URL`.
+
+## Reliability
+
+- 30 s request timeout; retries with backoff on network errors, 429, 502–504 and GitHub secondary rate limits (`Retry-After` honoured).
+- Values the provider would refuse (GitHub > 48 KB, GitLab masked < 8 chars or multi-line) fail **before** any write.
+- `Ctrl-C` / `SIGTERM` cancel in-flight requests.
 
 ## Classification
 

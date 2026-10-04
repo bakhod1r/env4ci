@@ -9,16 +9,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/bakhod1r/env4ci/internal/application"
 	"github.com/bakhod1r/env4ci/internal/domain"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/ciscan"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/dotenv"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/httpx"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/github"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/gitlab"
 )
@@ -47,14 +51,27 @@ Flags (after the subcommand):
   --write        scan: write .env.example and .env.<group>.example (skips existing)
   --by           scan: group by "env" (default) or "branch"
   --dir          scan: project root (default .)
+  --exit-code    diff: exit 2 when there are changes (for CI drift checks)
 
-Tokens: GITHUB_TOKEN (or GH_TOKEN), GITLAB_TOKEN.
+Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN.
+GitLab URL: targets.gitlab.base_url, else GITLAB_URL / CI_SERVER_URL, else https://gitlab.com.
+
+Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes.
 `
 
+// errDrift signals diff --exit-code found changes.
+var errDrift = errors.New("changes detected")
+
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdin, os.Stdout); err != nil {
+	httpx.UserAgent = "env4ci/" + version
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:], os.Stdin, os.Stdout)
+	stop()
+	switch {
+	case err == nil:
+	case errors.Is(err, errDrift):
+		os.Exit(2)
+	default:
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -63,7 +80,7 @@ func main() {
 type opts struct {
 	config, file, env, repo, out string
 	dir, by                      string
-	prune, yes, write            bool
+	prune, yes, write, exitCode  bool
 }
 
 func parseFlags(args []string) (opts, []string, error) {
@@ -90,6 +107,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.write, "write", false, "")
 	fs.StringVar(&o.dir, "dir", ".", "")
 	fs.StringVar(&o.by, "by", "env", "")
+	fs.BoolVar(&o.exitCode, "exit-code", false, "")
 
 	// Allow flags before and after positional args.
 	var pos []string
@@ -168,9 +186,12 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	}
 	printPlan(out, p.Name(), plan, o.prune)
 	if cmd == "diff" || cmd == "plan" {
+		if o.exitCode && (plan.HasWrites() || (o.prune && hasRemoteOnly(plan))) {
+			return errDrift
+		}
 		return nil
 	}
-	if !plan.HasWrites() && !(o.prune && hasRemoteOnly(plan)) {
+	if !plan.HasWrites() && (!o.prune || !hasRemoteOnly(plan)) {
 		fmt.Fprintln(out, "\nNothing to do.")
 		return nil
 	}
@@ -366,11 +387,14 @@ func newProvider(name string, cfg config.Config, o opts) (application.Provider, 
 		}
 		c := &github.Client{BaseURL: t.BaseURL, Repo: first(o.repo, t.Repo), Environment: first(o.env, t.Environment)}
 		c.Token = first(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN"))
+		if c.Token == "" {
+			c.Token = ghCLIToken()
+		}
 		if c.Repo == "" {
 			return nil, errors.New("github: repo not set (--repo or targets.github.repo)")
 		}
 		if c.Token == "" {
-			return nil, errors.New("github: GITHUB_TOKEN not set")
+			return nil, errors.New("github: no token (set GITHUB_TOKEN or run \"gh auth login\")")
 		}
 		return c, nil
 	case "gitlab":
@@ -378,7 +402,7 @@ func newProvider(name string, cfg config.Config, o opts) (application.Provider, 
 		if t == nil {
 			t = &config.GitLab{}
 		}
-		c := &gitlab.Client{BaseURL: t.BaseURL, Project: first(o.repo, t.Project), Environment: first(o.env, t.Environment), Protected: t.Protected}
+		c := &gitlab.Client{BaseURL: first(t.BaseURL, os.Getenv("GITLAB_URL"), os.Getenv("CI_SERVER_URL")), Project: first(o.repo, t.Project), Environment: first(o.env, t.Environment), Protected: t.Protected}
 		c.Token = os.Getenv("GITLAB_TOKEN")
 		if c.Project == "" {
 			return nil, errors.New("gitlab: project not set (--repo or targets.gitlab.project)")
@@ -451,7 +475,11 @@ func ensureGitignored(gitignore, path string) (bool, error) {
 func printLocal(out io.Writer, vars []domain.Variable) {
 	fmt.Fprintf(out, "✓ loaded %d variables\n", len(vars))
 	for _, k := range []domain.Kind{domain.KindSecret, domain.KindVariable} {
-		fmt.Fprintf(out, "\n%ss\n", strings.Title(k.String())) //nolint:staticcheck
+		title := "Variables"
+		if k == domain.KindSecret {
+			title = "Secrets"
+		}
+		fmt.Fprintf(out, "\n%s\n", title)
 		for _, v := range vars {
 			if v.Kind == k {
 				fmt.Fprintf(out, "  %s\n", v.Key)
@@ -485,6 +513,17 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 	line, _ := bufio.NewReader(in).ReadString('\n')
 	a := strings.ToLower(strings.TrimSpace(line))
 	return a == "y" || a == "yes"
+}
+
+// ghCLIToken asks the GitHub CLI for its token; empty if gh is absent.
+func ghCLIToken() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	b, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func first(vals ...string) string {

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/crypto/nacl/box"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/httpx"
 )
 
 const DefaultBaseURL = "https://api.github.com"
@@ -26,8 +28,18 @@ type Client struct {
 	Token       string
 	Repo        string // owner/name
 	Environment string // empty = repository level
-	HTTP        *http.Client
+	HTTP        Doer   // nil = httpx.New()
+
+	publicKey *publicKey // fetched once per Client
 }
+
+type publicKey struct {
+	KeyID string `json:"key_id"`
+	Key   string `json:"key"`
+}
+
+// MaxSecretSize is GitHub's limit for one secret value.
+const MaxSecretSize = 48 * 1024
 
 func (c *Client) Name() string {
 	if c.Environment != "" {
@@ -97,14 +109,26 @@ func (c *Client) Set(ctx context.Context, v domain.Variable) error {
 	return err
 }
 
-func (c *Client) setSecret(ctx context.Context, v domain.Variable) error {
-	var pk struct {
-		KeyID string `json:"key_id"`
-		Key   string `json:"key"`
+// Validate implements application.Validator.
+func (c *Client) Validate(v domain.Variable) error {
+	if v.Kind == domain.KindSecret && len(v.Value) > MaxSecretSize {
+		return fmt.Errorf("github: secret %s is %d bytes; limit is %d", v.Key, len(v.Value), MaxSecretSize)
 	}
-	if err := c.do(ctx, http.MethodGet, c.prefix()+"/secrets/public-key", nil, &pk); err != nil {
+	return nil
+}
+
+func (c *Client) setSecret(ctx context.Context, v domain.Variable) error {
+	if err := c.Validate(v); err != nil {
 		return err
 	}
+	if c.publicKey == nil {
+		var pk publicKey
+		if err := c.do(ctx, http.MethodGet, c.prefix()+"/secrets/public-key", nil, &pk); err != nil {
+			return err
+		}
+		c.publicKey = &pk
+	}
+	pk := c.publicKey
 	sealed, err := Seal(pk.Key, v.Value)
 	if err != nil {
 		return err
@@ -136,6 +160,11 @@ func (c *Client) Delete(ctx context.Context, key string, kind domain.Kind) error
 	return c.do(ctx, http.MethodDelete, c.prefix()+store+url.PathEscape(key), nil, nil)
 }
 
+// Doer sends HTTP requests; *httpx.Client and *http.Client satisfy it.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type apiError struct {
 	Status int
 	Msg    string
@@ -144,8 +173,8 @@ type apiError struct {
 func (e *apiError) Error() string { return fmt.Sprintf("github: HTTP %d: %s", e.Status, e.Msg) }
 
 func isNotFound(err error) bool {
-	e, ok := err.(*apiError)
-	return ok && e.Status == http.StatusNotFound
+	var e *apiError
+	return errors.As(err, &e) && e.Status == http.StatusNotFound
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
@@ -171,11 +200,10 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	hc := c.HTTP
-	if hc == nil {
-		hc = http.DefaultClient
+	if c.HTTP == nil {
+		c.HTTP = httpx.New()
 	}
-	resp, err := hc.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
 	}

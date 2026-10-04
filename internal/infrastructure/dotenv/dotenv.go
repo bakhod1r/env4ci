@@ -121,7 +121,7 @@ func WriteExample(w io.Writer, header string, keys []ExampleKey) error {
 		if len(k.Stages) > 0 {
 			comment += " · stages: " + strings.Join(k.Stages, ", ")
 		}
-		if len(k.Branches) > 0 && !(len(k.Branches) == 1 && k.Branches[0] == "*") {
+		if len(k.Branches) > 1 || (len(k.Branches) == 1 && k.Branches[0] != "*") {
 			comment += " · branches: " + strings.Join(k.Branches, ", ")
 		}
 		comment += " · " + strings.Join(k.Sources, ", ")

@@ -1,0 +1,22 @@
+version: "2"
+linters:
+  enable: [errorlint, gosec, misspell, unconvert]
+  settings:
+    errcheck:
+      # Terminal writes and response-body cleanup have no useful recovery.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - io.Copy
+        - (io.Closer).Close
+        - (*os.File).Close
+    gosec:
+      excludes:
+        - G304 # reading user-supplied .env/config paths is the point
+        - G104 # duplicate of errcheck, which has the exclusions above
+        - G302 # 0644 only for non-secret files (config, .gitignore, .env examples); pull uses 0600
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck, gosec]

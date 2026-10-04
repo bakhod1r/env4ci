@@ -1,6 +1,8 @@
 module github.com/bakhod1r/env4ci
 
-go 1.26.0
+go 1.26.6
+
+toolchain go1.26.8
 
 require (
 	golang.org/x/crypto v0.57.0
