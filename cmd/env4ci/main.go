@@ -193,34 +193,18 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		return nil
 	}
 
-	// Group by environment; the same key from GitHub and GitLab is one line.
+	// The same key from GitHub and GitLab is one line per environment.
 	var envs []string
+	var merged []domain.Reference
 	groups := map[string][]dotenv.ExampleKey{}
-	for _, r := range refs {
-		g, seen := groups[r.Environment]
-		if !seen {
-			envs = append(envs, r.Environment)
-		}
-		merged := false
-		for i := range g {
-			if g[i].Key == r.Key {
-				g[i].Sources = append(g[i].Sources, r.Sources...)
-				if r.Kind == domain.KindSecret {
-					g[i].Kind = domain.KindSecret.String()
-				}
-				merged = true
-			}
-		}
-		if !merged {
-			g = append(g, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String(), Sources: r.Sources})
-		}
-		groups[r.Environment] = g
-	}
-
-	for _, env := range envs {
-		fmt.Fprintf(out, "\n%s\n", envLabel(env))
-		for _, k := range groups[env] {
-			fmt.Fprintf(out, "  %-32s %-8s %s\n", k.Key, k.Kind, strings.Join(k.Sources, ", "))
+	for _, g := range domain.GroupByEnvironment(refs) {
+		envs = append(envs, g.Environment)
+		merged = append(merged, g.Refs...)
+		fmt.Fprintf(out, "\n%s\n", envLabel(g.Environment))
+		for _, r := range g.Refs {
+			groups[g.Environment] = append(groups[g.Environment],
+				dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String(), Stages: r.Stages, Sources: r.Sources})
+			fmt.Fprintf(out, "  %-28s %-8s %-18s %s\n", r.Key, r.Kind, strings.Join(r.Stages, ","), strings.Join(r.Sources, ", "))
 		}
 	}
 
@@ -229,10 +213,10 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if missing := domain.MissingFrom(refs, local); len(missing) > 0 {
+		if missing := domain.MissingFrom(merged, local); len(missing) > 0 {
 			fmt.Fprintf(out, "\n! missing from %s:\n", o.file)
 			for _, m := range missing {
-				fmt.Fprintf(out, "  %s (%s)\n", m.Key, envLabel(m.Environment))
+				fmt.Fprintf(out, "  %s (%s, stages: %s)\n", m.Key, envLabel(m.Environment), strings.Join(m.Stages, ","))
 			}
 		} else {
 			fmt.Fprintf(out, "\n✓ %s has every key CI uses\n", o.file)

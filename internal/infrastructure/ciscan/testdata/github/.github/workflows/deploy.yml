@@ -1,0 +1,28 @@
+name: deploy
+on: push
+env:
+  REGION: ${{ vars.AWS_REGION }}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go test ./...
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  deploy:
+    needs: test
+    environment: production
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - run: deploy --port ${{ vars.APP_PORT }} --key ${{secrets.JWT_SECRET}}
+      - if: ${{ vars.NOTIFY == 'true' && secrets.SLACK_WEBHOOK != '' }}
+        run: notify
+  staging:
+    environment:
+      name: staging
+      url: https://staging.example.com
+    steps:
+      - run: echo ${{ secrets.DATABASE_URL }}

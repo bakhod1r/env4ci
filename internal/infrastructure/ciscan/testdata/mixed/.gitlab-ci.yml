@@ -1,0 +1,5 @@
+release:
+  stage: deploy
+  environment: production
+  script:
+    - run "$DATABASE_URL" $APP_PORT

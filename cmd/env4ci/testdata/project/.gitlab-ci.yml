@@ -1,0 +1,28 @@
+include:
+  - local: .gitlab/ci/deploy.yml
+  - local: /.gitlab/ci/lint-*.yml
+  - remote: https://example.com/ci.yml
+  - template: Security/SAST.gitlab-ci.yml
+
+variables:
+  GO_VERSION: "1.25"
+
+stages: [lint, test, build, deploy]
+
+default:
+  before_script:
+    - echo "registry $REGISTRY_USER"
+
+.docker: &docker
+  image: docker:27
+  script:
+    - docker login -u "$REGISTRY_USER" -p "$REGISTRY_PASSWORD"
+
+test:
+  script:
+    - go test ./... && echo $GO_VERSION $CI_COMMIT_SHA $HOME $$NOT_A_VAR
+    - curl -H "token: $SONAR_TOKEN" ${SONAR_HOST}
+
+build:
+  stage: build
+  <<: *docker

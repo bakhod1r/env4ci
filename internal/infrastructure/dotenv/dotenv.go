@@ -106,6 +106,7 @@ func Write(w io.Writer, entries []Entry) error {
 type ExampleKey struct {
 	Key     string
 	Kind    string
+	Stages  []string
 	Sources []string
 }
 
@@ -115,7 +116,12 @@ func WriteExample(w io.Writer, header string, keys []ExampleKey) error {
 		return err
 	}
 	for _, k := range keys {
-		if _, err := fmt.Fprintf(w, "\n# %s · %s\n%s=\n", k.Kind, strings.Join(k.Sources, ", "), k.Key); err != nil {
+		comment := k.Kind
+		if len(k.Stages) > 0 {
+			comment += " · stages: " + strings.Join(k.Stages, ", ")
+		}
+		comment += " · " + strings.Join(k.Sources, ", ")
+		if _, err := fmt.Fprintf(w, "\n# %s\n%s=\n", comment, k.Key); err != nil {
 			return err
 		}
 	}

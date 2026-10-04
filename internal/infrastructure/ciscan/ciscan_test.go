@@ -1,122 +1,52 @@
 package ciscan
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
 )
 
-const workflow = `
-name: deploy
-on: push
-env:
-  REGION: ${{ vars.AWS_REGION }}
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo ${{ secrets.GITHUB_TOKEN }} ${{ secrets.CODECOV_TOKEN }}
-  deploy:
-    environment: production
-    runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-    steps:
-      - run: deploy --port ${{ vars.APP_PORT }} --key ${{secrets.JWT_SECRET}}
-  stage:
-    environment:
-      name: staging
-      url: https://x
-    steps:
-      - run: echo ${{ secrets.DATABASE_URL }}
-`
+var update = flag.Bool("update", false, "rewrite golden files")
 
-const gitlabCI = `
-variables:
-  GO_VERSION: "1.25"
-stages: [test, deploy]
-test:
-  script:
-    - go test ./... && echo $GO_VERSION $CI_COMMIT_SHA $HOME
-    - curl -H "token: $SONAR_TOKEN" ${SONAR_HOST}
-deploy:
-  environment: production
-  variables:
-    TARGET: prod
-  script:
-    - deploy --db "$DATABASE_URL" --to $TARGET --log $LOG_LEVEL
-`
-
-func write(t *testing.T, root, rel, content string) {
-	t.Helper()
-	p := filepath.Join(root, rel)
-	os.MkdirAll(filepath.Dir(p), 0o755)
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func index(refs []domain.Reference) map[string]domain.Reference {
-	m := map[string]domain.Reference{}
+// render prints references one per line, stable and diff-friendly.
+func render(refs []domain.Reference) string {
+	var b strings.Builder
 	for _, r := range refs {
-		m[r.Environment+"/"+r.Key] = r
+		env := r.Environment
+		if env == "" {
+			env = "-"
+		}
+		fmt.Fprintf(&b, "%-11s %-20s %-8s %-6s stages=%s sources=%s\n",
+			env, r.Key, r.Kind, r.Provider, strings.Join(r.Stages, ","), strings.Join(r.Sources, ","))
 	}
-	return m
+	return b.String()
 }
 
-func TestScanGitHub(t *testing.T) {
-	root := t.TempDir()
-	write(t, root, ".github/workflows/deploy.yml", workflow)
-	refs, err := Scan(root, domain.DefaultClassifier())
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := index(refs)
-	want := map[string]domain.Kind{
-		"/AWS_REGION":             domain.KindVariable,
-		"/CODECOV_TOKEN":          domain.KindSecret,
-		"production/DATABASE_URL": domain.KindSecret,
-		"production/APP_PORT":     domain.KindVariable,
-		"production/JWT_SECRET":   domain.KindSecret,
-		"staging/DATABASE_URL":    domain.KindSecret,
-	}
-	if len(m) != len(want) {
-		t.Fatalf("got %d refs: %+v", len(m), refs)
-	}
-	for k, kind := range want {
-		r, ok := m[k]
-		if !ok || r.Kind != kind || r.Provider != "github" {
-			t.Errorf("%s: got %+v", k, r)
-		}
-	}
-	if m["/AWS_REGION"].Sources[0] != ".github/workflows/deploy.yml" {
-		t.Errorf("source = %v", m["/AWS_REGION"].Sources)
-	}
-}
-
-func TestScanGitLab(t *testing.T) {
-	root := t.TempDir()
-	write(t, root, ".gitlab-ci.yml", gitlabCI)
-	refs, err := Scan(root, domain.DefaultClassifier())
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := index(refs)
-	want := map[string]domain.Kind{
-		"/SONAR_TOKEN":            domain.KindSecret,
-		"/SONAR_HOST":             domain.KindSecret, // unknown => secret
-		"production/DATABASE_URL": domain.KindSecret,
-		"production/LOG_LEVEL":    domain.KindVariable,
-	}
-	if len(m) != len(want) {
-		t.Fatalf("got %d refs: %+v", len(m), refs)
-	}
-	for k, kind := range want {
-		if r, ok := m[k]; !ok || r.Kind != kind || r.Provider != "gitlab" {
-			t.Errorf("%s: got %+v", k, r)
-		}
+func TestScanFixtures(t *testing.T) {
+	for _, name := range []string{"github", "gitlab", "mixed"} {
+		t.Run(name, func(t *testing.T) {
+			refs, err := Scan(filepath.Join("testdata", name), domain.DefaultClassifier())
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := render(refs)
+			golden := filepath.Join("testdata", name+".golden")
+			if *update {
+				os.WriteFile(golden, []byte(got), 0o644)
+			}
+			want, err := os.ReadFile(golden)
+			if err != nil {
+				t.Fatalf("%v (run: go test ./internal/infrastructure/ciscan -update)", err)
+			}
+			if got != string(want) {
+				t.Errorf("mismatch for %s\n--- got\n%s--- want\n%s", name, got, want)
+			}
+		})
 	}
 }
 
@@ -124,5 +54,32 @@ func TestScanNothing(t *testing.T) {
 	refs, err := Scan(t.TempDir(), domain.DefaultClassifier())
 	if err != nil || len(refs) != 0 {
 		t.Fatalf("refs=%v err=%v", refs, err)
+	}
+}
+
+func TestScanMissingIncludeIsError(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte("include: [{local: nope.yml}]\n"), 0o644)
+	if _, err := Scan(dir, domain.DefaultClassifier()); err == nil || !strings.Contains(err.Error(), "nope.yml") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestScanIncludeCycle(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte("include: a.yml\njob: {script: [echo $X_TOKEN]}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a.yml"), []byte("include: .gitlab-ci.yml\n"), 0o644)
+	refs, err := Scan(dir, domain.DefaultClassifier())
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("refs=%v err=%v", refs, err)
+	}
+}
+
+func TestScanInvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".github", "workflows", "x.yml"), []byte("jobs: [unclosed"), 0o644)
+	if _, err := Scan(dir, domain.DefaultClassifier()); err == nil || !strings.Contains(err.Error(), "x.yml") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -1,0 +1,8 @@
+-           LINT_TOKEN           secret   gitlab stages=lint sources=.gitlab/ci/lint-go.yml
+-           REGISTRY_PASSWORD    secret   gitlab stages=build sources=.gitlab-ci.yml
+-           REGISTRY_USER        secret   gitlab stages=all,build sources=.gitlab-ci.yml
+-           SONAR_HOST           secret   gitlab stages=test sources=.gitlab-ci.yml
+-           SONAR_TOKEN          secret   gitlab stages=test sources=.gitlab-ci.yml
+production  DATABASE_URL         secret   gitlab stages=deploy sources=.gitlab/ci/deploy.yml
+production  LOG_LEVEL            variable gitlab stages=deploy sources=.gitlab/ci/deploy.yml
+staging     DATABASE_URL         secret   gitlab stages=deploy sources=.gitlab/ci/deploy.yml

@@ -23,8 +23,15 @@ env4ci scan -f .env --write      # find vars CI files use, write .env examples
 ## Scan CI files
 
 `env4ci scan` reads `.github/workflows/*.yml` (`${{ secrets.X }}`, `${{ vars.X }}`) and `.gitlab-ci.yml`
-(`$X`, `${X}`), skipping `GITHUB_TOKEN`, `CI_*`, `GITLAB_*` and variables defined in the file itself.
-Keys are grouped by the job's `environment:`.
+(`$X`, `${X}`) plus every `include: local` file it pulls in (globs supported; remote/template includes are not fetched).
+It skips `GITHUB_TOKEN`, `CI_*`, `GITLAB_*`, `$$` escapes and variables defined in the pipeline itself.
+Keys are grouped by the job's `environment:` and tagged with where they are used:
+the GitLab `stage:` (default `test`) or the GitHub job id; `all` means workflow-level `env:` or GitLab `default:`.
+
+```env
+# secret · stages: deploy · .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+DATABASE_URL=
+```
 
 - `--write` creates `.env.example` (shared) and `.env.<env>.example` per environment; existing files are skipped.
 - `-f .env` lists keys CI needs that your file lacks.

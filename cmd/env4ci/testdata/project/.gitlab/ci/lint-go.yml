@@ -1,0 +1,4 @@
+lint:
+  stage: lint
+  script:
+    - golangci-lint run --token $LINT_TOKEN

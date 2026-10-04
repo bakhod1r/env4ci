@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,42 +100,70 @@ func TestEnsureGitignored(t *testing.T) {
 	}
 }
 
-func TestScanWritesExamples(t *testing.T) {
-	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".github", "workflows", "ci.yml"), []byte(`
-jobs:
-  test:
-    steps: [{run: "echo ${{ vars.APP_PORT }}"}]
-  deploy:
-    environment: production
-    steps: [{run: "echo ${{ secrets.DATABASE_URL }}"}]
-`), 0o644)
-	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte("deploy:\n  environment: production\n  script: [\"run $DATABASE_URL\"]\n"), 0o644)
-	env := filepath.Join(dir, ".env")
-	os.WriteFile(env, []byte("APP_PORT=1\n"), 0o600)
+var update = flag.Bool("update", false, "rewrite golden files")
 
+// copyDir copies a fixture tree so tests can write into it.
+func copyDir(t *testing.T, src string) string {
+	t.Helper()
+	dst := t.TempDir()
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
+func golden(t *testing.T, name, got string) {
+	t.Helper()
+	path := filepath.Join("testdata", "golden", name)
+	if *update {
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(got), 0o644)
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run: go test ./cmd/env4ci -update)", err)
+	}
+	if got != string(want) {
+		t.Errorf("%s mismatch\n--- got\n%s--- want\n%s", name, got, want)
+	}
+}
+
+func TestScanGolden(t *testing.T) {
+	dir := copyDir(t, filepath.Join("testdata", "project"))
 	var out bytes.Buffer
-	args := []string{"scan", "--dir", dir, "--write", "-f", env, "-c", filepath.Join(dir, "none.yaml")}
+	args := []string{"scan", "--dir", dir, "--write", "-f", filepath.Join(dir, "local.env"), "-c", filepath.Join(dir, "none.yaml")}
 	if err := run(context.Background(), args, nil, &out); err != nil {
 		t.Fatal(err)
 	}
-	shared, _ := os.ReadFile(filepath.Join(dir, ".env.example"))
-	prod, _ := os.ReadFile(filepath.Join(dir, ".env.production.example"))
-	if !strings.Contains(string(shared), "\nAPP_PORT=\n") {
-		t.Fatalf("shared:\n%s", shared)
-	}
-	if strings.Count(string(prod), "DATABASE_URL=") != 1 || !strings.Contains(string(prod), ".gitlab-ci.yml") {
-		t.Fatalf("prod:\n%s", prod)
-	}
-	if !strings.Contains(out.String(), "missing from") || !strings.Contains(out.String(), "DATABASE_URL (environment: production)") {
-		t.Fatalf("out:\n%s", out.String())
+	golden(t, "scan.stdout", strings.ReplaceAll(out.String(), dir, "<dir>"))
+	for _, f := range []string{".env.example", ".env.production.example", ".env.staging.example"} {
+		b, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		golden(t, strings.TrimPrefix(f, "."), string(b))
 	}
 
 	// Second run must not overwrite.
 	out.Reset()
-	run(context.Background(), args, nil, &out)
-	if !strings.Contains(out.String(), "skipped") {
-		t.Fatalf("want skip:\n%s", out.String())
+	if err := run(context.Background(), args, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out.String(), "skipped") != 3 {
+		t.Fatalf("want 3 skips:\n%s", out.String())
 	}
 }

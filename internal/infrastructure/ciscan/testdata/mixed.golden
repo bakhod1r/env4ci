@@ -1,0 +1,4 @@
+production  APP_PORT             variable github stages=deploy sources=.github/workflows/ci.yml
+production  APP_PORT             variable gitlab stages=deploy sources=.gitlab-ci.yml
+production  DATABASE_URL         secret   github stages=deploy sources=.github/workflows/ci.yml
+production  DATABASE_URL         secret   gitlab stages=deploy sources=.gitlab-ci.yml

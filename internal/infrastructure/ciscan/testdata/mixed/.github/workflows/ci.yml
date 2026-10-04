@@ -1,0 +1,5 @@
+jobs:
+  deploy:
+    environment: production
+    steps:
+      - run: echo ${{ secrets.DATABASE_URL }} ${{ vars.APP_PORT }}

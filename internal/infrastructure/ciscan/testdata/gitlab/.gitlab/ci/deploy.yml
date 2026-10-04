@@ -1,0 +1,14 @@
+deploy:production:
+  stage: deploy
+  environment: production
+  variables:
+    TARGET: prod
+  script:
+    - deploy --db "$DATABASE_URL" --to $TARGET --log $LOG_LEVEL
+
+deploy:staging:
+  stage: deploy
+  environment:
+    name: staging
+  script:
+    - deploy --db "$DATABASE_URL"

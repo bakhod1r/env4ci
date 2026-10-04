@@ -1,0 +1,1 @@
+not yaml, not scanned: ${{ secrets.IGNORED }}

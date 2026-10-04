@@ -1,0 +1,40 @@
+
+shared (repository / scope *)
+  AWS_REGION                   variable all                .github/workflows/deploy.yml
+  CODECOV_TOKEN                secret   test               .github/workflows/deploy.yml
+  HOMEBREW_TAP_TOKEN           secret   release            .github/workflows/release.yaml
+  LINT_TOKEN                   secret   lint               .gitlab/ci/lint-go.yml
+  REGISTRY_PASSWORD            secret   build              .gitlab-ci.yml
+  REGISTRY_USER                secret   all,build          .gitlab-ci.yml
+  SONAR_HOST                   secret   test               .gitlab-ci.yml
+  SONAR_TOKEN                  secret   test               .gitlab-ci.yml
+
+environment: production
+  APP_PORT                     variable deploy             .github/workflows/deploy.yml
+  DATABASE_URL                 secret   deploy             .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+  JWT_SECRET                   secret   deploy             .github/workflows/deploy.yml
+  LOG_LEVEL                    variable deploy             .gitlab/ci/deploy.yml
+  NOTIFY                       variable deploy             .github/workflows/deploy.yml
+  SLACK_WEBHOOK                secret   deploy             .github/workflows/deploy.yml
+
+environment: staging
+  DATABASE_URL                 secret   staging,deploy     .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+
+! missing from <dir>/local.env:
+  AWS_REGION (shared (repository / scope *), stages: all)
+  CODECOV_TOKEN (shared (repository / scope *), stages: test)
+  HOMEBREW_TAP_TOKEN (shared (repository / scope *), stages: release)
+  LINT_TOKEN (shared (repository / scope *), stages: lint)
+  REGISTRY_PASSWORD (shared (repository / scope *), stages: build)
+  REGISTRY_USER (shared (repository / scope *), stages: all,build)
+  SONAR_HOST (shared (repository / scope *), stages: test)
+  DATABASE_URL (environment: production, stages: deploy)
+  JWT_SECRET (environment: production, stages: deploy)
+  LOG_LEVEL (environment: production, stages: deploy)
+  NOTIFY (environment: production, stages: deploy)
+  SLACK_WEBHOOK (environment: production, stages: deploy)
+  DATABASE_URL (environment: staging, stages: staging,deploy)
+
+✓ wrote <dir>/.env.example (8 keys)
+✓ wrote <dir>/.env.production.example (6 keys)
+✓ wrote <dir>/.env.staging.example (1 keys)

@@ -1,0 +1,3 @@
+# not included anywhere, must not be scanned
+ghost:
+  script: [echo $GHOST_SECRET]
