@@ -6,8 +6,29 @@ Sync environment variables and secrets between local `.env` files, **GitHub Acti
 
 [![ci](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml/badge.svg)](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml)
 
+## Install
+
+No Go needed — every release ships static binaries.
+
 ```bash
-go install github.com/bakhod1r/env4ci/cmd/env4ci@latest
+# macOS / Linux (detects OS and arch, verifies checksums.txt)
+curl -sSfL https://raw.githubusercontent.com/bakhod1r/env4ci/main/install.sh | sh
+#   ENV4CI_VERSION=v0.1.0 pins a release; BINDIR=~/bin picks the directory
+
+brew install bakhod1r/tap/env4ci                           # Homebrew
+scoop bucket add bakhod1r https://github.com/bakhod1r/scoop-bucket
+scoop install env4ci                                       # Windows / Scoop
+
+go install github.com/bakhod1r/env4ci/cmd/env4ci@latest    # with Go
+```
+
+GitHub Actions:
+
+```yaml
+- uses: bakhod1r/env4ci@v0        # with: { version: v0.1.0 } to pin
+- run: env4ci check github --all  # exit 2 if CI uses secrets the repo lacks
+  env:
+    GITHUB_TOKEN: ${{ secrets.ENV4CI_TOKEN }}
 ```
 
 Or download a binary (Linux, macOS, Windows; amd64/arm64) from [Releases](https://github.com/bakhod1r/env4ci/releases).

@@ -1,0 +1,36 @@
+name: Setup env4ci
+description: Install env4ci (sync .env files with GitHub Actions, GitLab CI/CD and Vault) from GitHub releases
+author: bakhod1r
+branding:
+  icon: lock
+  color: green
+inputs:
+  version:
+    description: Release to install, e.g. v0.1.0 (default latest)
+    required: false
+    default: latest
+outputs:
+  version:
+    description: Installed env4ci version
+    value: ${{ steps.install.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      env:
+        ENV4CI_VERSION: ${{ inputs.version != 'latest' && inputs.version || '' }}
+        BINDIR: ${{ runner.temp }}/env4ci/bin
+      run: |
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          v="$ENV4CI_VERSION"
+          [ -n "$v" ] || v=$(curl -sSfLI -o /dev/null -w '%{url_effective}' https://github.com/bakhod1r/env4ci/releases/latest | sed 's#.*/##')
+          a=$([ "$RUNNER_ARCH" = "ARM64" ] && echo arm64 || echo amd64)
+          mkdir -p "$BINDIR"
+          curl -sSfL "https://github.com/bakhod1r/env4ci/releases/download/$v/env4ci_${v#v}_windows_$a.zip" -o "$RUNNER_TEMP/env4ci.zip"
+          unzip -o -q "$RUNNER_TEMP/env4ci.zip" env4ci.exe -d "$BINDIR"
+        else
+          sh "$GITHUB_ACTION_PATH/install.sh"
+        fi
+        echo "$BINDIR" >> "$GITHUB_PATH"
+        echo "version=$("$BINDIR/env4ci" version | awk '{print $2}')" >> "$GITHUB_OUTPUT"

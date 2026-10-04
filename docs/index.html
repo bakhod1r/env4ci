@@ -63,7 +63,8 @@ footer a{color:var(--muted)}
   <div>
     <h1>Environment configuration for CI/CD.</h1>
     <p class="lead">Sync <code>.env</code> files with GitHub Actions, GitLab CI/CD and HashiCorp Vault. Review a plan before anything changes. Secret values are never printed.</p>
-    <div class="install"><code id="cmd">go install github.com/bakhod1r/env4ci/cmd/env4ci@latest</code><button id="copy" type="button">Copy</button></div>
+    <div class="install"><code id="cmd">curl -sSfL https://raw.githubusercontent.com/bakhod1r/env4ci/main/install.sh | sh</code><button id="copy" type="button">Copy</button></div>
+    <p class="sub">No Go needed. Also: <code>brew install bakhod1r/tap/env4ci</code> · <code>scoop install env4ci</code> · <code>uses: bakhod1r/env4ci@v0</code> · <code>go install</code></p>
     <div class="cta"><a class="btn primary" href="https://github.com/bakhod1r/env4ci#usage">Get started</a><a class="btn ghost" href="https://github.com/bakhod1r/env4ci">Source</a></div>
   </div>
   <div>

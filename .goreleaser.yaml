@@ -31,3 +31,33 @@ changelog:
   sort: asc
   filters:
     exclude: ["^docs:", "^test:", "^chore:"]
+
+# Tap and bucket pushes need a PAT with contents:write on those repos
+# (secrets HOMEBREW_TAP_TOKEN / SCOOP_BUCKET_TOKEN). Without it they are skipped.
+homebrew_casks:
+  - name: env4ci
+    repository:
+      owner: bakhod1r
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    skip_upload: '{{ if envOrDefault "HOMEBREW_TAP_TOKEN" "" }}false{{ else }}true{{ end }}'
+    homepage: https://bakhod1r.github.io/env4ci/
+    description: Sync .env files with GitHub Actions, GitLab CI/CD and HashiCorp Vault
+    license: MIT
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/env4ci"]
+          end
+
+scoops:
+  - name: env4ci
+    repository:
+      owner: bakhod1r
+      name: scoop-bucket
+      token: '{{ envOrDefault "SCOOP_BUCKET_TOKEN" "" }}'
+    skip_upload: '{{ if envOrDefault "SCOOP_BUCKET_TOKEN" "" }}false{{ else }}true{{ end }}'
+    homepage: https://bakhod1r.github.io/env4ci/
+    description: Sync .env files with GitHub Actions, GitLab CI/CD and HashiCorp Vault
+    license: MIT

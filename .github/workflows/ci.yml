@@ -61,3 +61,21 @@ jobs:
         with:
           version: "~> v2"
           args: check
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+
+  action:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: setup
+        uses: ./
+      - run: env4ci version
+        shell: bash
+      - run: test -n "${{ steps.setup.outputs.version }}"
+        shell: bash
