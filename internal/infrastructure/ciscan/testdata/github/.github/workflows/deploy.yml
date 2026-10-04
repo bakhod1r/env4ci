@@ -1,5 +1,9 @@
 name: deploy
-on: push
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
 env:
   REGION: ${{ vars.AWS_REGION }}
 jobs:
@@ -21,6 +25,7 @@ jobs:
       - if: ${{ vars.NOTIFY == 'true' && secrets.SLACK_WEBHOOK != '' }}
         run: notify
   staging:
+    if: github.ref == 'refs/heads/develop'
     environment:
       name: staging
       url: https://staging.example.com

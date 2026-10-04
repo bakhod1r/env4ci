@@ -87,7 +87,8 @@ func scanGitHubDir(root string) ([]domain.Reference, error) {
 
 func scanGitHub(f *file) []domain.Reference {
 	var refs []domain.Reference
-	emit := func(n *yaml.Node, env, stage string) {
+	wfBranches := githubTriggerBranches(mapGet(f.root, "on"))
+	emit := func(n *yaml.Node, env, stage string, branches []string) {
 		walkScalars(n, func(s string) {
 			for _, expr := range ghExpr.FindAllStringSubmatch(s, -1) {
 				for _, m := range ghRef.FindAllStringSubmatch(expr[1], -1) {
@@ -99,21 +100,76 @@ func scanGitHub(f *file) []domain.Reference {
 						kind = domain.KindSecret
 					}
 					refs = append(refs, domain.Reference{Key: m[2], Kind: kind, Provider: "github",
-						Environment: env, Stages: []string{stage}, Sources: []string{f.rel}})
+						Environment: env, Stages: []string{stage}, Branches: branches, Sources: []string{f.rel}})
 				}
 			}
 		})
 	}
 	eachPair(f.root, func(k string, v *yaml.Node) {
 		if k != "jobs" || v.Kind != yaml.MappingNode {
-			emit(v, "", StageAll)
+			emit(v, "", StageAll, wfBranches)
 			return
 		}
 		eachPair(v, func(jobID string, job *yaml.Node) {
-			emit(job, environmentOf(job), jobID)
+			branches := wfBranches
+			if cond := mapGet(job, "if"); cond != nil {
+				if bs := githubIfBranches(cond.Value); len(bs) > 0 {
+					branches = bs
+				}
+			}
+			emit(job, environmentOf(job), jobID, branches)
 		})
 	})
 	return refs
+}
+
+var (
+	ghIfRef     = regexp.MustCompile(`github\.ref\s*==\s*['"]refs/heads/([^'"]+)['"]`)
+	ghIfRefName = regexp.MustCompile(`github\.ref_name\s*==\s*['"]([^'"]+)['"]`)
+)
+
+// githubTriggerBranches reads `on:`. push/pull_request without a branches
+// filter, and other events, run on any branch; a tags-only push yields BranchTags.
+func githubTriggerBranches(on *yaml.Node) []string {
+	if on == nil {
+		return []string{domain.BranchAll}
+	}
+	if on.Kind != yaml.MappingNode { // `on: push` or `on: [push, pull_request]`
+		return []string{domain.BranchAll}
+	}
+	var out []string
+	eachPair(on, func(event string, cfg *yaml.Node) {
+		if event != "push" && event != "pull_request" && event != "pull_request_target" {
+			out = append(out, domain.BranchAll)
+			return
+		}
+		if b := mapGet(cfg, "branches"); b != nil {
+			out = append(out, scalars(b)...)
+			return
+		}
+		if mapGet(cfg, "tags") != nil && mapGet(cfg, "branches-ignore") == nil {
+			out = append(out, domain.BranchTags)
+			return
+		}
+		out = append(out, domain.BranchAll)
+	})
+	if len(out) == 0 {
+		return []string{domain.BranchAll}
+	}
+	return out
+}
+
+// githubIfBranches extracts branches from a job `if:` like
+// github.ref == 'refs/heads/main' || github.ref_name == 'develop'.
+func githubIfBranches(cond string) []string {
+	var out []string
+	for _, m := range ghIfRef.FindAllStringSubmatch(cond, -1) {
+		out = append(out, m[1])
+	}
+	for _, m := range ghIfRefName.FindAllStringSubmatch(cond, -1) {
+		out = append(out, m[1])
+	}
+	return out
 }
 
 // --- GitLab ---
@@ -170,7 +226,7 @@ func scanGitLabDir(root string, cl domain.Classifier) ([]domain.Reference, error
 
 	var refs []domain.Reference
 	for _, f := range files {
-		emit := func(n *yaml.Node, env string, stages []string) {
+		emit := func(n *yaml.Node, env string, stages, branches []string) {
 			walkScalars(n, func(s string) {
 				s = strings.ReplaceAll(s, "$$", "") // $$ is an escaped dollar
 				for _, m := range glRef.FindAllStringSubmatch(s, -1) {
@@ -179,7 +235,7 @@ func scanGitLabDir(root string, cl domain.Classifier) ([]domain.Reference, error
 						continue
 					}
 					refs = append(refs, domain.Reference{Key: key, Kind: cl.Classify(key), Provider: "gitlab",
-						Environment: env, Stages: stages, Sources: []string{f.rel}})
+						Environment: env, Stages: stages, Branches: branches, Sources: []string{f.rel}})
 				}
 			})
 		}
@@ -188,11 +244,11 @@ func scanGitLabDir(root string, cl domain.Classifier) ([]domain.Reference, error
 			case k == "include" || k == "variables" || k == "stages" || k == "workflow":
 				// definitions only
 			case glKeyword[k]:
-				emit(v, "", []string{StageAll})
+				emit(v, "", []string{StageAll}, []string{domain.BranchAll})
 			case strings.HasPrefix(k, "."): // hidden template; counted where it is merged in
-				emit(v, "", nil)
+				emit(v, "", nil, nil)
 			case v.Kind == yaml.MappingNode:
-				emit(v, environmentOf(v), []string{stageOf(v)})
+				emit(v, environmentOf(v), []string{stageOf(v)}, gitlabBranches(v))
 			}
 		})
 	}
@@ -220,6 +276,89 @@ func localIncludes(root *yaml.Node) []string {
 			if l := mapGet(it, "local"); l != nil && l.Kind == yaml.ScalarNode {
 				out = append(out, l.Value)
 			}
+		}
+	}
+	return out
+}
+
+var (
+	glOnlyKeyword = map[string]bool{"branches": true, "merge_requests": true, "pushes": true, "schedules": true, "api": true, "web": true, "triggers": true, "pipelines": true, "external": true, "chat": true, "external_pull_requests": true}
+	glRuleBranch  = regexp.MustCompile(`\$CI_COMMIT_(?:BRANCH|REF_NAME)\s*(==|=~)\s*("[^"]*"|'[^']*'|/[^/]*/|\$CI_DEFAULT_BRANCH)`)
+)
+
+// gitlabBranches reads a job's `only:` or `rules:`. Without either, the job
+// runs on every branch. A rule without a branch condition (and not
+// `when: never`) also means every branch.
+func gitlabBranches(job *yaml.Node) []string {
+	if only := mapGet(job, "only"); only != nil {
+		refs := only
+		if only.Kind == yaml.MappingNode {
+			refs = mapGet(only, "refs")
+		}
+		var out []string
+		for _, r := range scalars(refs) {
+			switch {
+			case r == "tags":
+				out = append(out, domain.BranchTags)
+			case glOnlyKeyword[r]:
+				out = append(out, domain.BranchAll)
+			default:
+				out = append(out, r)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	rules := mapGet(job, "rules")
+	if rules == nil || rules.Kind != yaml.SequenceNode {
+		return []string{domain.BranchAll}
+	}
+	var out []string
+	for _, rule := range rules.Content {
+		if w := mapGet(rule, "when"); w != nil && w.Value == "never" {
+			continue
+		}
+		cond := ""
+		if c := mapGet(rule, "if"); c != nil {
+			cond = c.Value
+		}
+		if strings.Contains(cond, "$CI_COMMIT_TAG") && !strings.Contains(cond, "$CI_COMMIT_BRANCH") {
+			out = append(out, domain.BranchTags)
+			continue
+		}
+		ms := glRuleBranch.FindAllStringSubmatch(cond, -1)
+		if len(ms) == 0 {
+			out = append(out, domain.BranchAll)
+			continue
+		}
+		for _, m := range ms {
+			v := m[2]
+			if v == "$CI_DEFAULT_BRANCH" {
+				out = append(out, "(default)")
+				continue
+			}
+			out = append(out, strings.Trim(v, `"'`))
+		}
+	}
+	if len(out) == 0 {
+		return []string{domain.BranchAll}
+	}
+	return out
+}
+
+// scalars returns the scalar values of a scalar or sequence node.
+func scalars(n *yaml.Node) []string {
+	if n == nil {
+		return nil
+	}
+	if n.Kind == yaml.ScalarNode {
+		return []string{n.Value}
+	}
+	var out []string
+	for _, c := range n.Content {
+		if c.Kind == yaml.ScalarNode {
+			out = append(out, c.Value)
 		}
 	}
 	return out

@@ -104,10 +104,11 @@ func Write(w io.Writer, entries []Entry) error {
 
 // ExampleKey is one key for a generated .env.example.
 type ExampleKey struct {
-	Key     string
-	Kind    string
-	Stages  []string
-	Sources []string
+	Key      string
+	Kind     string
+	Stages   []string
+	Branches []string // omitted from the comment when it runs on every branch
+	Sources  []string
 }
 
 // WriteExample emits KEY= lines with a comment saying where each key is used.
@@ -119,6 +120,9 @@ func WriteExample(w io.Writer, header string, keys []ExampleKey) error {
 		comment := k.Kind
 		if len(k.Stages) > 0 {
 			comment += " · stages: " + strings.Join(k.Stages, ", ")
+		}
+		if len(k.Branches) > 0 && !(len(k.Branches) == 1 && k.Branches[0] == "*") {
+			comment += " · branches: " + strings.Join(k.Branches, ", ")
 		}
 		comment += " · " + strings.Join(k.Sources, ", ")
 		if _, err := fmt.Fprintf(w, "\n# %s\n%s=\n", comment, k.Key); err != nil {

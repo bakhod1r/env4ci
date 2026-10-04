@@ -1,4 +1,6 @@
 lint:
   stage: lint
+  only:
+    refs: [merge_requests, tags]
   script:
     - golangci-lint run --token $LINT_TOKEN

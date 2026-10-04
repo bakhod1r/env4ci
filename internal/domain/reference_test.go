@@ -45,3 +45,34 @@ func TestMissingFrom(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestMergeCollapsesBranchesToAll(t *testing.T) {
+	got := MergeReferences([]Reference{
+		{Key: "A", Branches: []string{"main"}},
+		{Key: "A", Branches: []string{"develop"}},
+		{Key: "B", Branches: []string{"main"}},
+		{Key: "B", Branches: []string{BranchAll}},
+	})
+	if !reflect.DeepEqual(got[0].Branches, []string{"develop", "main"}) || !reflect.DeepEqual(got[1].Branches, []string{BranchAll}) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestGroupByBranch(t *testing.T) {
+	groups := GroupByBranch([]Reference{
+		{Key: "DB", Environment: "production", Branches: []string{"main", "release/*"}, Stages: []string{"deploy"}},
+		{Key: "DB", Environment: "staging", Branches: []string{"develop"}, Stages: []string{"deploy"}},
+		{Key: "LINT", Branches: []string{BranchAll}},
+		{Key: "OLD"}, // no branch info = everywhere
+	})
+	var names []string
+	for _, g := range groups {
+		names = append(names, g.Environment)
+	}
+	if !reflect.DeepEqual(names, []string{BranchAll, "develop", "main", "release/*"}) {
+		t.Fatalf("names = %v", names)
+	}
+	if len(groups[0].Refs) != 2 || len(groups[2].Refs) != 1 || groups[2].Refs[0].Key != "DB" {
+		t.Fatalf("groups = %+v", groups)
+	}
+}

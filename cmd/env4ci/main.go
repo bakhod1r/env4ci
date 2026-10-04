@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/bakhod1r/env4ci/internal/application"
@@ -43,7 +44,8 @@ Flags (after the subcommand):
   --prune        push: delete remote keys missing locally
   -y, --yes      push: skip confirmation
   -o, --out      pull: output file (default .env.<env> or .env.pulled)
-  --write        scan: write .env.example and .env.<env>.example (skips existing)
+  --write        scan: write .env.example and .env.<group>.example (skips existing)
+  --by           scan: group by "env" (default) or "branch"
   --dir          scan: project root (default .)
 
 Tokens: GITHUB_TOKEN (or GH_TOKEN), GITLAB_TOKEN.
@@ -60,7 +62,7 @@ func main() {
 
 type opts struct {
 	config, file, env, repo, out string
-	dir                          string
+	dir, by                      string
 	prune, yes, write            bool
 }
 
@@ -87,6 +89,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.prune, "prune", false, "")
 	fs.BoolVar(&o.write, "write", false, "")
 	fs.StringVar(&o.dir, "dir", ".", "")
+	fs.StringVar(&o.by, "by", "env", "")
 
 	// Allow flags before and after positional args.
 	var pos []string
@@ -193,18 +196,31 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		return nil
 	}
 
-	// The same key from GitHub and GitLab is one line per environment.
+	var grouped []domain.EnvGroup
+	label, fileName := envLabel, envFile
+	switch o.by {
+	case "env", "environment":
+		grouped = domain.GroupByEnvironment(refs)
+	case "branch":
+		grouped = domain.GroupByBranch(refs)
+		label, fileName = branchLabel, branchFile
+	default:
+		return fmt.Errorf("--by: want env or branch, got %q", o.by)
+	}
+
+	// The same key from GitHub and GitLab is one line per group.
 	var envs []string
 	var merged []domain.Reference
 	groups := map[string][]dotenv.ExampleKey{}
-	for _, g := range domain.GroupByEnvironment(refs) {
+	for _, g := range grouped {
 		envs = append(envs, g.Environment)
 		merged = append(merged, g.Refs...)
-		fmt.Fprintf(out, "\n%s\n", envLabel(g.Environment))
+		fmt.Fprintf(out, "\n%s\n", label(g.Environment))
 		for _, r := range g.Refs {
 			groups[g.Environment] = append(groups[g.Environment],
-				dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String(), Stages: r.Stages, Sources: r.Sources})
-			fmt.Fprintf(out, "  %-28s %-8s %-18s %s\n", r.Key, r.Kind, strings.Join(r.Stages, ","), strings.Join(r.Sources, ", "))
+				dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String(), Stages: r.Stages, Branches: r.Branches, Sources: r.Sources})
+			fmt.Fprintf(out, "  %-28s %-8s %-16s %-20s %s\n", r.Key, r.Kind,
+				strings.Join(r.Stages, ","), strings.Join(r.Branches, ","), strings.Join(r.Sources, ", "))
 		}
 	}
 
@@ -216,7 +232,7 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		if missing := domain.MissingFrom(merged, local); len(missing) > 0 {
 			fmt.Fprintf(out, "\n! missing from %s:\n", o.file)
 			for _, m := range missing {
-				fmt.Fprintf(out, "  %s (%s, stages: %s)\n", m.Key, envLabel(m.Environment), strings.Join(m.Stages, ","))
+				fmt.Fprintf(out, "  %s (%s, stages: %s)\n", m.Key, label(m.Environment), strings.Join(m.Stages, ","))
 			}
 		} else {
 			fmt.Fprintf(out, "\n✓ %s has every key CI uses\n", o.file)
@@ -227,11 +243,14 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		return nil
 	}
 	fmt.Fprintln(out)
+	used := map[string]int{}
 	for _, env := range envs {
-		name := ".env.example"
-		if env != "" {
-			name = ".env." + env + ".example"
+		// Distinct groups can slug to one name ("release/*", "/^release\//").
+		name := fileName(env)
+		if n := used[name]; n > 0 {
+			name = strings.TrimSuffix(name, ".example") + fmt.Sprintf("-%d.example", n+1)
 		}
+		used[fileName(env)]++
 		path := filepath.Join(o.dir, name)
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if errors.Is(err, os.ErrExist) {
@@ -241,7 +260,7 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		err = dotenv.WriteExample(f, envLabel(env), groups[env])
+		err = dotenv.WriteExample(f, label(env), groups[env])
 		f.Close()
 		if err != nil {
 			return err
@@ -249,6 +268,42 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		fmt.Fprintf(out, "✓ wrote %s (%d keys)\n", path, len(groups[env]))
 	}
 	return nil
+}
+
+func envFile(env string) string {
+	if env == "" {
+		return ".env.example"
+	}
+	return ".env." + slug(env) + ".example"
+}
+
+func branchLabel(b string) string {
+	switch b {
+	case domain.BranchAll:
+		return "all branches"
+	case domain.BranchTags:
+		return "tags"
+	}
+	return "branch: " + b
+}
+
+func branchFile(b string) string {
+	if b == domain.BranchAll {
+		return ".env.example"
+	}
+	return ".env." + slug(b) + ".example"
+}
+
+var slugRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// slug makes a branch or environment usable as a file name part:
+// "release/*" -> "release", "/^release\//" -> "release", "(tags)" -> "tags".
+func slug(s string) string {
+	s = strings.Trim(slugRe.ReplaceAllString(s, "-"), "-.")
+	if s == "" {
+		return "branch"
+	}
+	return s
 }
 
 func envLabel(env string) string {

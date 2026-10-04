@@ -1,9 +1,9 @@
--           AWS_REGION           variable github stages=all sources=.github/workflows/deploy.yml
--           CODECOV_TOKEN        secret   github stages=test sources=.github/workflows/deploy.yml
--           HOMEBREW_TAP_TOKEN   secret   github stages=release sources=.github/workflows/release.yaml
-production  APP_PORT             variable github stages=deploy sources=.github/workflows/deploy.yml
-production  DATABASE_URL         secret   github stages=deploy sources=.github/workflows/deploy.yml
-production  JWT_SECRET           secret   github stages=deploy sources=.github/workflows/deploy.yml
-production  NOTIFY               variable github stages=deploy sources=.github/workflows/deploy.yml
-production  SLACK_WEBHOOK        secret   github stages=deploy sources=.github/workflows/deploy.yml
-staging     DATABASE_URL         secret   github stages=staging sources=.github/workflows/deploy.yml
+-           AWS_REGION           variable github stages=all branches=develop,main sources=.github/workflows/deploy.yml
+-           CODECOV_TOKEN        secret   github stages=test branches=develop,main sources=.github/workflows/deploy.yml
+-           HOMEBREW_TAP_TOKEN   secret   github stages=release branches=(tags) sources=.github/workflows/release.yaml
+production  APP_PORT             variable github stages=deploy branches=develop,main sources=.github/workflows/deploy.yml
+production  DATABASE_URL         secret   github stages=deploy branches=develop,main sources=.github/workflows/deploy.yml
+production  JWT_SECRET           secret   github stages=deploy branches=develop,main sources=.github/workflows/deploy.yml
+production  NOTIFY               variable github stages=deploy branches=develop,main sources=.github/workflows/deploy.yml
+production  SLACK_WEBHOOK        secret   github stages=deploy branches=develop,main sources=.github/workflows/deploy.yml
+staging     DATABASE_URL         secret   github stages=staging branches=develop sources=.github/workflows/deploy.yml

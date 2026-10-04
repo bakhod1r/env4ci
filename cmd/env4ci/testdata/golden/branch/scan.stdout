@@ -1,0 +1,43 @@
+
+all branches
+  LINT_TOKEN                   secret   lint             *                    .gitlab/ci/lint-go.yml
+  REGISTRY_PASSWORD            secret   build            *                    .gitlab-ci.yml
+  REGISTRY_USER                secret   all,build        *                    .gitlab-ci.yml
+  SONAR_HOST                   secret   test             *                    .gitlab-ci.yml
+  SONAR_TOKEN                  secret   test             *                    .gitlab-ci.yml
+
+branch: (default)
+  DATABASE_URL                 secret   deploy           (default),/^release\/ .gitlab/ci/deploy.yml
+  LOG_LEVEL                    variable deploy           (default),/^release\/ .gitlab/ci/deploy.yml
+
+tags
+  HOMEBREW_TAP_TOKEN           secret   release          (tags)               .github/workflows/release.yaml
+
+branch: /^release\/
+  DATABASE_URL                 secret   deploy           (default),/^release\/ .gitlab/ci/deploy.yml
+  LOG_LEVEL                    variable deploy           (default),/^release\/ .gitlab/ci/deploy.yml
+
+branch: develop
+  APP_PORT                     variable deploy           develop,main         .github/workflows/deploy.yml
+  AWS_REGION                   variable all              develop,main         .github/workflows/deploy.yml
+  CODECOV_TOKEN                secret   test             develop,main         .github/workflows/deploy.yml
+  DATABASE_URL                 secret   deploy,staging   develop,main         .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+  JWT_SECRET                   secret   deploy           develop,main         .github/workflows/deploy.yml
+  NOTIFY                       variable deploy           develop,main         .github/workflows/deploy.yml
+  SLACK_WEBHOOK                secret   deploy           develop,main         .github/workflows/deploy.yml
+
+branch: main
+  APP_PORT                     variable deploy           develop,main         .github/workflows/deploy.yml
+  AWS_REGION                   variable all              develop,main         .github/workflows/deploy.yml
+  CODECOV_TOKEN                secret   test             develop,main         .github/workflows/deploy.yml
+  DATABASE_URL                 secret   deploy           develop,main         .github/workflows/deploy.yml
+  JWT_SECRET                   secret   deploy           develop,main         .github/workflows/deploy.yml
+  NOTIFY                       variable deploy           develop,main         .github/workflows/deploy.yml
+  SLACK_WEBHOOK                secret   deploy           develop,main         .github/workflows/deploy.yml
+
+✓ wrote <dir>/.env.example (5 keys)
+✓ wrote <dir>/.env.default.example (2 keys)
+✓ wrote <dir>/.env.tags.example (1 keys)
+✓ wrote <dir>/.env.release.example (2 keys)
+✓ wrote <dir>/.env.develop.example (7 keys)
+✓ wrote <dir>/.env.main.example (7 keys)

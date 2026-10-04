@@ -1,6 +1,11 @@
 deploy:production:
   stage: deploy
   environment: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
   variables:
     TARGET: prod
   script:
@@ -8,6 +13,7 @@ deploy:production:
 
 deploy:staging:
   stage: deploy
+  only: [develop]
   environment:
     name: staging
   script:

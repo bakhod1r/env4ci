@@ -11,8 +11,14 @@ type Reference struct {
 	Provider    string
 	Environment string
 	Stages      []string
+	Branches    []string // BranchAll, branch names/patterns, or BranchTags
 	Sources     []string
 }
+
+const (
+	BranchAll  = "*"      // runs on every branch
+	BranchTags = "(tags)" // runs on tags only
+)
 
 // MergeReferences dedupes by provider+environment+key, unions stages and
 // sources, and promotes kind to secret if any occurrence is a secret.
@@ -51,7 +57,7 @@ func mergeBy(refs []Reference, key func(Reference) any) []Reference {
 		cur, ok := byID[i]
 		if !ok {
 			c := r
-			c.Stages, c.Sources = nil, nil
+			c.Stages, c.Branches, c.Sources = nil, nil, nil
 			cur = &c
 			byID[i] = cur
 			order = append(order, i)
@@ -63,6 +69,7 @@ func mergeBy(refs []Reference, key func(Reference) any) []Reference {
 			cur.Provider = ""
 		}
 		cur.Stages = union(cur.Stages, r.Stages)
+		cur.Branches = normalizeBranches(union(cur.Branches, r.Branches))
 		cur.Sources = union(cur.Sources, r.Sources)
 	}
 	out := make([]Reference, 0, len(order))
@@ -77,6 +84,51 @@ func mergeBy(refs []Reference, key func(Reference) any) []Reference {
 		return x.Key < y.Key
 	})
 	return out
+}
+
+// GroupByBranch puts each key in every branch group it runs on. The
+// BranchAll group comes first; a key that runs everywhere is only there.
+func GroupByBranch(refs []Reference) []EnvGroup {
+	type id struct{ b, k string }
+	byBranch := map[string][]Reference{}
+	for _, r := range refs {
+		branches := r.Branches
+		if len(branches) == 0 {
+			branches = []string{BranchAll}
+		}
+		for _, b := range branches {
+			c := r
+			c.Environment = b
+			byBranch[b] = append(byBranch[b], c)
+		}
+	}
+	var names []string
+	for b := range byBranch {
+		names = append(names, b)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if (names[i] == BranchAll) != (names[j] == BranchAll) {
+			return names[i] == BranchAll
+		}
+		return names[i] < names[j]
+	})
+	var out []EnvGroup
+	for _, b := range names {
+		merged := mergeBy(byBranch[b], func(r Reference) any { return id{b, r.Key} })
+		out = append(out, EnvGroup{Environment: b, Refs: merged})
+	}
+	return out
+}
+
+// normalizeBranches collapses to BranchAll when any occurrence runs everywhere.
+func normalizeBranches(bs []string) []string {
+	for _, b := range bs {
+		if b == BranchAll {
+			return []string{BranchAll}
+		}
+	}
+	sort.Strings(bs)
+	return bs
 }
 
 // MissingFrom returns references whose key is absent from local.

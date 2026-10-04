@@ -29,9 +29,18 @@ Keys are grouped by the job's `environment:` and tagged with where they are used
 the GitLab `stage:` (default `test`) or the GitHub job id; `all` means workflow-level `env:` or GitLab `default:`.
 
 ```env
-# secret · stages: deploy · .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+# secret · stages: deploy · branches: main, develop · .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
 DATABASE_URL=
 ```
+
+### Group by branch
+
+`env4ci scan --by branch --write` writes one example per branch: `.env.example` (all branches),
+`.env.main.example`, `.env.develop.example`, `.env.tags.example`, ...
+
+Branches come from GitHub `on.push/pull_request.branches` and job `if: github.ref == 'refs/heads/x'`,
+and from GitLab `only:` and `rules: - if: $CI_COMMIT_BRANCH == "x"` (`=~ /regex/` and `$CI_DEFAULT_BRANCH` → `(default)`).
+Tag-only jobs go to `(tags)`. Anything without a branch filter runs on all branches.
 
 - `--write` creates `.env.example` (shared) and `.env.<env>.example` per environment; existing files are skipped.
 - `-f .env` lists keys CI needs that your file lacks.

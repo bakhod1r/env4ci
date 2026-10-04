@@ -21,8 +21,8 @@ func render(refs []domain.Reference) string {
 		if env == "" {
 			env = "-"
 		}
-		fmt.Fprintf(&b, "%-11s %-20s %-8s %-6s stages=%s sources=%s\n",
-			env, r.Key, r.Kind, r.Provider, strings.Join(r.Stages, ","), strings.Join(r.Sources, ","))
+		fmt.Fprintf(&b, "%-11s %-20s %-8s %-6s stages=%s branches=%s sources=%s\n",
+			env, r.Key, r.Kind, r.Provider, strings.Join(r.Stages, ","), strings.Join(r.Branches, ","), strings.Join(r.Sources, ","))
 	}
 	return b.String()
 }

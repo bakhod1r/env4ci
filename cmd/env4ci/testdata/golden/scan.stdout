@@ -1,24 +1,24 @@
 
 shared (repository / scope *)
-  AWS_REGION                   variable all                .github/workflows/deploy.yml
-  CODECOV_TOKEN                secret   test               .github/workflows/deploy.yml
-  HOMEBREW_TAP_TOKEN           secret   release            .github/workflows/release.yaml
-  LINT_TOKEN                   secret   lint               .gitlab/ci/lint-go.yml
-  REGISTRY_PASSWORD            secret   build              .gitlab-ci.yml
-  REGISTRY_USER                secret   all,build          .gitlab-ci.yml
-  SONAR_HOST                   secret   test               .gitlab-ci.yml
-  SONAR_TOKEN                  secret   test               .gitlab-ci.yml
+  AWS_REGION                   variable all              develop,main         .github/workflows/deploy.yml
+  CODECOV_TOKEN                secret   test             develop,main         .github/workflows/deploy.yml
+  HOMEBREW_TAP_TOKEN           secret   release          (tags)               .github/workflows/release.yaml
+  LINT_TOKEN                   secret   lint             *                    .gitlab/ci/lint-go.yml
+  REGISTRY_PASSWORD            secret   build            *                    .gitlab-ci.yml
+  REGISTRY_USER                secret   all,build        *                    .gitlab-ci.yml
+  SONAR_HOST                   secret   test             *                    .gitlab-ci.yml
+  SONAR_TOKEN                  secret   test             *                    .gitlab-ci.yml
 
 environment: production
-  APP_PORT                     variable deploy             .github/workflows/deploy.yml
-  DATABASE_URL                 secret   deploy             .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
-  JWT_SECRET                   secret   deploy             .github/workflows/deploy.yml
-  LOG_LEVEL                    variable deploy             .gitlab/ci/deploy.yml
-  NOTIFY                       variable deploy             .github/workflows/deploy.yml
-  SLACK_WEBHOOK                secret   deploy             .github/workflows/deploy.yml
+  APP_PORT                     variable deploy           develop,main         .github/workflows/deploy.yml
+  DATABASE_URL                 secret   deploy           (default),/^release\/,develop,main .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+  JWT_SECRET                   secret   deploy           develop,main         .github/workflows/deploy.yml
+  LOG_LEVEL                    variable deploy           (default),/^release\/ .gitlab/ci/deploy.yml
+  NOTIFY                       variable deploy           develop,main         .github/workflows/deploy.yml
+  SLACK_WEBHOOK                secret   deploy           develop,main         .github/workflows/deploy.yml
 
 environment: staging
-  DATABASE_URL                 secret   staging,deploy     .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
+  DATABASE_URL                 secret   staging,deploy   develop              .github/workflows/deploy.yml, .gitlab/ci/deploy.yml
 
 ! missing from <dir>/local.env:
   AWS_REGION (shared (repository / scope *), stages: all)

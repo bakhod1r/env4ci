@@ -167,3 +167,57 @@ func TestScanGolden(t *testing.T) {
 		t.Fatalf("want 3 skips:\n%s", out.String())
 	}
 }
+
+func TestScanByBranchGolden(t *testing.T) {
+	dir := copyDir(t, filepath.Join("testdata", "project"))
+	var out bytes.Buffer
+	args := []string{"scan", "--by", "branch", "--dir", dir, "--write", "-c", filepath.Join(dir, "none.yaml")}
+	if err := run(context.Background(), args, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "branch/scan.stdout", strings.ReplaceAll(out.String(), dir, "<dir>"))
+	for _, f := range []string{".env.example", ".env.main.example", ".env.develop.example", ".env.tags.example", ".env.default.example", ".env.release.example"} {
+		b, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", f, err, out.String())
+		}
+		golden(t, "branch/"+strings.TrimPrefix(f, "."), string(b))
+	}
+}
+
+func TestScanByInvalid(t *testing.T) {
+	dir := copyDir(t, filepath.Join("testdata", "project"))
+	err := run(context.Background(), []string{"scan", "--by", "stage", "--dir", dir, "-c", filepath.Join(dir, "x.yaml")}, nil, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--by") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSlug(t *testing.T) {
+	for in, want := range map[string]string{"main": "main", "release/*": "release", `/^release\//`: "release", "(tags)": "tags", "feature/x-1": "feature-x-1", "***": "branch"} {
+		if got := slug(in); got != want {
+			t.Errorf("slug(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestScanFileNameCollision(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte(`
+a:
+  only: ["release/*"]
+  script: [echo $A_TOKEN]
+b:
+  only: ["/^release\\//"]
+  script: [echo $B_TOKEN]
+`), 0o644)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"scan", "--by", "branch", "--write", "--dir", dir, "-c", filepath.Join(dir, "x.yaml")}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{".env.release.example", ".env.release-2.example"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Fatalf("%s missing:\n%s", f, out.String())
+		}
+	}
+}
