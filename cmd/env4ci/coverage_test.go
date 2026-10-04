@@ -108,7 +108,7 @@ func TestRunDispatchErrors(t *testing.T) {
 	runErr(t, "flag provided but not defined", "push", "--nope")
 	runErr(t, "unknown command", "frobnicate", "-c", cfg)
 	runErr(t, "at most one provider", "diff", "github", "gitlab", "-c", cfg)
-	runErr(t, "is a directory", "validate", "-c", dir) // config path is a directory
+	runErr(t, dir, "validate", "-c", dir) // config path is a directory (message differs per OS)
 
 	// auth file with a CI variable is refused at start-up.
 	os.WriteFile(filepath.Join(dir, "auth.env"), []byte("DATABASE_URL=x\n"), 0o600)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -104,10 +105,11 @@ func TestLoadEdgeCases(t *testing.T) {
 }
 
 func TestGitLabStatAndIncludeErrors(t *testing.T) {
-	// root is a file: stat of root/.gitlab-ci.yml fails with ENOTDIR.
+	// root is a file: stat of root/.gitlab-ci.yml fails with ENOTDIR
+	// (Windows reports "not found" instead, which is not an error).
 	f := filepath.Join(t.TempDir(), "file")
 	os.WriteFile(f, nil, 0o644)
-	if _, err := scanGitLabDir(f, domain.DefaultClassifier()); err == nil {
+	if _, err := scanGitLabDir(f, domain.DefaultClassifier()); err == nil && runtime.GOOS != "windows" {
 		t.Fatal("want stat error")
 	}
 
