@@ -1,0 +1,5 @@
+/env4ci
+/dist/
+.env
+.env.*
+!.env.example

@@ -1,0 +1,58 @@
+package dotenv
+
+import (
+	"bytes"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestParse(t *testing.T) {
+	in := `
+# comment
+export A=1
+B = two words # trailing
+C="line\nbreak \"q\""
+D='raw $x # kept'
+E=
+A=override
+`
+	got, err := Parse(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Entry{
+		{"A", "override"},
+		{"B", "two words"},
+		{"C", "line\nbreak \"q\""},
+		{"D", "raw $x # kept"},
+		{"E", ""},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestParseErrors(t *testing.T) {
+	for _, in := range []string{"NOEQ", "=v", `A="open`, "A='open"} {
+		if _, err := Parse(strings.NewReader(in)); err == nil {
+			t.Errorf("Parse(%q): want error", in)
+		}
+	}
+}
+
+func TestRoundTrip(t *testing.T) {
+	in := []Entry{{"Z", "a\"b\\c\nd"}, {"A", "plain"}}
+	var buf bytes.Buffer
+	if err := Write(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Entry{{"A", "plain"}, {"Z", "a\"b\\c\nd"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v", got)
+	}
+}

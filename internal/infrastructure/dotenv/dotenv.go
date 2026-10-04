@@ -1,0 +1,103 @@
+// Package dotenv parses and writes .env files.
+package dotenv
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+)
+
+// Entry is one KEY=VALUE pair in file order.
+type Entry struct {
+	Key   string
+	Value string
+}
+
+// Parse reads KEY=VALUE lines. Supports comments, blank lines, an optional
+// "export " prefix, and single/double quoted values (\n, \", \\ escapes in double quotes).
+func Parse(r io.Reader) ([]Entry, error) {
+	var out []Entry
+	seen := map[string]int{}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	line := 0
+	for sc.Scan() {
+		line++
+		s := strings.TrimSpace(sc.Text())
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		s = strings.TrimPrefix(s, "export ")
+		eq := strings.IndexByte(s, '=')
+		if eq <= 0 {
+			return nil, fmt.Errorf("line %d: expected KEY=VALUE", line)
+		}
+		key := strings.TrimSpace(s[:eq])
+		val, err := parseValue(strings.TrimSpace(s[eq+1:]))
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", line, err)
+		}
+		if i, dup := seen[key]; dup {
+			out[i].Value = val // last one wins, like most dotenv loaders
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, Entry{Key: key, Value: val})
+	}
+	return out, sc.Err()
+}
+
+func parseValue(v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	switch v[0] {
+	case '\'':
+		end := strings.IndexByte(v[1:], '\'')
+		if end < 0 {
+			return "", fmt.Errorf("unterminated single quote")
+		}
+		return v[1 : end+1], nil
+	case '"':
+		var b strings.Builder
+		for i := 1; i < len(v); i++ {
+			c := v[i]
+			if c == '"' {
+				return b.String(), nil
+			}
+			if c == '\\' && i+1 < len(v) {
+				i++
+				switch v[i] {
+				case 'n':
+					b.WriteByte('\n')
+				case 't':
+					b.WriteByte('\t')
+				default:
+					b.WriteByte(v[i])
+				}
+				continue
+			}
+			b.WriteByte(c)
+		}
+		return "", fmt.Errorf("unterminated double quote")
+	}
+	if i := strings.Index(v, " #"); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	return v, nil
+}
+
+// Write emits entries sorted by key, double-quoting every value.
+func Write(w io.Writer, entries []Entry) error {
+	sorted := append([]Entry(nil), entries...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Key < sorted[j].Key })
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`)
+	for _, e := range sorted {
+		if _, err := fmt.Fprintf(w, "%s=\"%s\"\n", e.Key, r.Replace(e.Value)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
