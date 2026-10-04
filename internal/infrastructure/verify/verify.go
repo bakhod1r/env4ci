@@ -163,9 +163,16 @@ func parseKey(key, passphrase string) (ssh.Signer, error) {
 	return s, nil
 }
 
+// OS seams, replaced in tests to reach failure paths.
+var (
+	createTemp     = os.CreateTemp
+	userHomeDir    = os.UserHomeDir
+	systemCertPool = x509.SystemCertPool
+)
+
 func hostKeyCallback(content string) (ssh.HostKeyCallback, error) {
 	if content != "" {
-		f, err := os.CreateTemp("", "env4ci-known-hosts-*")
+		f, err := createTemp("", "env4ci-known-hosts-*")
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +184,7 @@ func hostKeyCallback(content string) (ssh.HostKeyCallback, error) {
 		f.Close()
 		return knownhosts.New(f.Name())
 	}
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +308,7 @@ func clientWithCA(caFile string) (*httpx.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ca_file: %w", err)
 	}
-	pool, err := x509.SystemCertPool()
+	pool, err := systemCertPool()
 	if err != nil || pool == nil {
 		pool = x509.NewCertPool()
 	}

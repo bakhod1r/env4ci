@@ -45,10 +45,7 @@ func load(root, path string) (*file, error) {
 	if err != nil {
 		return nil, err
 	}
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		rel = path
-	}
+	rel, _ := filepath.Rel(root, path) // path is always root-joined
 	rel = filepath.ToSlash(rel)
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {

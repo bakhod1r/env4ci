@@ -137,6 +137,9 @@ func (c *Client) setSecret(ctx context.Context, v domain.Variable) error {
 		map[string]string{"encrypted_value": sealed, "key_id": pk.KeyID}, nil)
 }
 
+// randReader is the entropy source for sealing; tests replace it.
+var randReader io.Reader = rand.Reader
+
 // Seal encrypts value with the repository public key (libsodium sealed box).
 func Seal(publicKeyB64, value string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(publicKeyB64)
@@ -145,7 +148,7 @@ func Seal(publicKeyB64, value string) (string, error) {
 	}
 	var pk [32]byte
 	copy(pk[:], raw)
-	out, err := box.SealAnonymous(nil, []byte(value), &pk, rand.Reader)
+	out, err := box.SealAnonymous(nil, []byte(value), &pk, randReader)
 	if err != nil {
 		return "", err
 	}

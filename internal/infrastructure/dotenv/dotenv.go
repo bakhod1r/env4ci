@@ -46,10 +46,7 @@ func Parse(r io.Reader) ([]Entry, error) {
 			line++
 			raw += "\n" + strings.TrimRight(sc.Text(), "\r")
 		}
-		val, err := parseValue(raw)
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", start, err)
-		}
+		val := parseValue(raw)
 		if i, dup := seen[key]; dup {
 			out[i].Value = val // last one wins, like most dotenv loaders
 			continue
@@ -76,23 +73,22 @@ func unterminated(v string) bool {
 	return true
 }
 
-func parseValue(v string) (string, error) {
+// parseValue decodes one value; Parse has already joined lines so quoted
+// values are terminated.
+func parseValue(v string) string {
 	if v == "" {
-		return "", nil
+		return ""
 	}
 	switch v[0] {
 	case '\'':
 		end := strings.IndexByte(v[1:], '\'')
-		if end < 0 {
-			return "", fmt.Errorf("unterminated single quote")
-		}
-		return v[1 : end+1], nil
+		return v[1 : end+1]
 	case '"':
 		var b strings.Builder
 		for i := 1; i < len(v); i++ {
 			c := v[i]
 			if c == '"' {
-				return b.String(), nil
+				break
 			}
 			if c == '\\' && i+1 < len(v) {
 				i++
@@ -108,12 +104,12 @@ func parseValue(v string) (string, error) {
 			}
 			b.WriteByte(c)
 		}
-		return "", fmt.Errorf("unterminated double quote")
+		return b.String()
 	}
 	if i := strings.Index(v, " #"); i >= 0 {
 		v = strings.TrimSpace(v[:i])
 	}
-	return v, nil
+	return v
 }
 
 // Write emits entries sorted by key, double-quoting every value.

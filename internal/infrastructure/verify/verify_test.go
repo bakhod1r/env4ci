@@ -275,3 +275,7 @@ func caFileWith(t *testing.T, content string) string {
 	os.WriteFile(p, []byte(content), 0o600)
 	return p
 }
+
+func certPEM(srv *httptest.Server) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+}
