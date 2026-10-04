@@ -10,10 +10,12 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"github.com/bakhod1r/env4ci/internal/application"
 	"github.com/bakhod1r/env4ci/internal/domain"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/ciscan"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/dotenv"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/github"
@@ -30,6 +32,7 @@ Usage:
   env4ci diff  <github|gitlab>      show plan (never prints values)
   env4ci push  <github|gitlab>      apply plan after confirmation
   env4ci pull  <github|gitlab>      write readable remote values to a .env file
+  env4ci scan                       list variables CI files expect; --write creates .env examples
   env4ci version
 
 Flags (after the subcommand):
@@ -40,6 +43,8 @@ Flags (after the subcommand):
   --prune        push: delete remote keys missing locally
   -y, --yes      push: skip confirmation
   -o, --out      pull: output file (default .env.<env> or .env.pulled)
+  --write        scan: write .env.example and .env.<env>.example (skips existing)
+  --dir          scan: project root (default .)
 
 Tokens: GITHUB_TOKEN (or GH_TOKEN), GITLAB_TOKEN.
 `
@@ -55,7 +60,8 @@ func main() {
 
 type opts struct {
 	config, file, env, repo, out string
-	prune, yes                   bool
+	dir                          string
+	prune, yes, write            bool
 }
 
 func parseFlags(args []string) (opts, []string, error) {
@@ -79,6 +85,8 @@ func parseFlags(args []string) (opts, []string, error) {
 	}
 	fs.StringVar(&o.repo, "repo", "", "")
 	fs.BoolVar(&o.prune, "prune", false, "")
+	fs.BoolVar(&o.write, "write", false, "")
+	fs.StringVar(&o.dir, "dir", ".", "")
 
 	// Allow flags before and after positional args.
 	var pos []string
@@ -125,6 +133,8 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		}
 		printLocal(out, local)
 		return nil
+	case "scan":
+		return cmdScan(cfg, o, out)
 	case "diff", "plan", "push", "apply", "pull":
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
@@ -167,6 +177,101 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	res, err := svc.Apply(ctx, local, plan, remote, application.ApplyOptions{Prune: o.prune})
 	fmt.Fprintf(out, "\n✓ %d written, %d deleted\n", res.Written, res.Deleted)
 	return err
+}
+
+func cmdScan(cfg config.Config, o opts, out io.Writer) error {
+	cl, err := cfg.Classifier()
+	if err != nil {
+		return err
+	}
+	refs, err := ciscan.Scan(o.dir, cl)
+	if err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		fmt.Fprintln(out, "No CI variables found (looked in .github/workflows and .gitlab-ci.yml).")
+		return nil
+	}
+
+	// Group by environment; the same key from GitHub and GitLab is one line.
+	var envs []string
+	groups := map[string][]dotenv.ExampleKey{}
+	for _, r := range refs {
+		g, seen := groups[r.Environment]
+		if !seen {
+			envs = append(envs, r.Environment)
+		}
+		merged := false
+		for i := range g {
+			if g[i].Key == r.Key {
+				g[i].Sources = append(g[i].Sources, r.Sources...)
+				if r.Kind == domain.KindSecret {
+					g[i].Kind = domain.KindSecret.String()
+				}
+				merged = true
+			}
+		}
+		if !merged {
+			g = append(g, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String(), Sources: r.Sources})
+		}
+		groups[r.Environment] = g
+	}
+
+	for _, env := range envs {
+		fmt.Fprintf(out, "\n%s\n", envLabel(env))
+		for _, k := range groups[env] {
+			fmt.Fprintf(out, "  %-32s %-8s %s\n", k.Key, k.Kind, strings.Join(k.Sources, ", "))
+		}
+	}
+
+	if o.file != "" {
+		local, err := loadLocal(cfg, o)
+		if err != nil {
+			return err
+		}
+		if missing := domain.MissingFrom(refs, local); len(missing) > 0 {
+			fmt.Fprintf(out, "\n! missing from %s:\n", o.file)
+			for _, m := range missing {
+				fmt.Fprintf(out, "  %s (%s)\n", m.Key, envLabel(m.Environment))
+			}
+		} else {
+			fmt.Fprintf(out, "\n✓ %s has every key CI uses\n", o.file)
+		}
+	}
+
+	if !o.write {
+		return nil
+	}
+	fmt.Fprintln(out)
+	for _, env := range envs {
+		name := ".env.example"
+		if env != "" {
+			name = ".env." + env + ".example"
+		}
+		path := filepath.Join(o.dir, name)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			fmt.Fprintf(out, "- skipped %s (exists)\n", path)
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		err = dotenv.WriteExample(f, envLabel(env), groups[env])
+		f.Close()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "✓ wrote %s (%d keys)\n", path, len(groups[env]))
+	}
+	return nil
+}
+
+func envLabel(env string) string {
+	if env == "" {
+		return "shared (repository / scope *)"
+	}
+	return "environment: " + env
 }
 
 func cmdInit(o opts, out io.Writer) error {

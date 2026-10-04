@@ -97,3 +97,43 @@ func TestEnsureGitignored(t *testing.T) {
 		t.Fatalf("%q", b)
 	}
 }
+
+func TestScanWritesExamples(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".github", "workflows", "ci.yml"), []byte(`
+jobs:
+  test:
+    steps: [{run: "echo ${{ vars.APP_PORT }}"}]
+  deploy:
+    environment: production
+    steps: [{run: "echo ${{ secrets.DATABASE_URL }}"}]
+`), 0o644)
+	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte("deploy:\n  environment: production\n  script: [\"run $DATABASE_URL\"]\n"), 0o644)
+	env := filepath.Join(dir, ".env")
+	os.WriteFile(env, []byte("APP_PORT=1\n"), 0o600)
+
+	var out bytes.Buffer
+	args := []string{"scan", "--dir", dir, "--write", "-f", env, "-c", filepath.Join(dir, "none.yaml")}
+	if err := run(context.Background(), args, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	shared, _ := os.ReadFile(filepath.Join(dir, ".env.example"))
+	prod, _ := os.ReadFile(filepath.Join(dir, ".env.production.example"))
+	if !strings.Contains(string(shared), "\nAPP_PORT=\n") {
+		t.Fatalf("shared:\n%s", shared)
+	}
+	if strings.Count(string(prod), "DATABASE_URL=") != 1 || !strings.Contains(string(prod), ".gitlab-ci.yml") {
+		t.Fatalf("prod:\n%s", prod)
+	}
+	if !strings.Contains(out.String(), "missing from") || !strings.Contains(out.String(), "DATABASE_URL (environment: production)") {
+		t.Fatalf("out:\n%s", out.String())
+	}
+
+	// Second run must not overwrite.
+	out.Reset()
+	run(context.Background(), args, nil, &out)
+	if !strings.Contains(out.String(), "skipped") {
+		t.Fatalf("want skip:\n%s", out.String())
+	}
+}

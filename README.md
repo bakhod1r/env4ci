@@ -17,7 +17,19 @@ env4ci diff github -e production # plan, never prints values
 env4ci push github -e production # apply after [y/N]
 env4ci push gitlab --prune       # also delete remote-only keys
 env4ci pull gitlab -o .env.prod  # remote -> local (0600, auto .gitignore)
+env4ci scan -f .env --write      # find vars CI files use, write .env examples
 ```
+
+## Scan CI files
+
+`env4ci scan` reads `.github/workflows/*.yml` (`${{ secrets.X }}`, `${{ vars.X }}`) and `.gitlab-ci.yml`
+(`$X`, `${X}`), skipping `GITHUB_TOKEN`, `CI_*`, `GITLAB_*` and variables defined in the file itself.
+Keys are grouped by the job's `environment:`.
+
+- `--write` creates `.env.example` (shared) and `.env.<env>.example` per environment; existing files are skipped.
+- `-f .env` lists keys CI needs that your file lacks.
+
+If your `.gitignore` has `.env.*`, add `!.env.*.example`.
 
 ```text
 github:bakhod1r/my-api@production
