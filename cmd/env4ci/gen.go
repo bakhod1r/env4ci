@@ -44,9 +44,7 @@ func loadAuthFile(cfg config.Config, out io.Writer) error {
 			return fmt.Errorf("%s: %s is not an env4ci setting; CI variables belong in the environment files", path, e.Key)
 		}
 		if e.Value != "" && os.Getenv(e.Key) == "" {
-			if err := os.Setenv(e.Key, e.Value); err != nil {
-				return err
-			}
+			_ = os.Setenv(e.Key, e.Value) // key is a known setting name: cannot be invalid
 		}
 	}
 	return nil
@@ -195,16 +193,10 @@ var commentedKey = regexp.MustCompile(`(?m)^\s*#\s*([A-Za-z_][A-Za-z0-9_]*)=`)
 func writeOrAppend(path, header string, keys []dotenv.ExampleKey, out io.Writer, ui palette) error {
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
+		var b strings.Builder
+		_ = dotenv.WriteKeys(&b, header, keys) // strings.Builder never fails
+		if err := writeNew(path, []byte(b.String()), 0o600); err != nil {
 			return err
-		}
-		werr := dotenv.WriteKeys(f, header, keys)
-		if cerr := f.Close(); werr == nil {
-			werr = cerr
-		}
-		if werr != nil {
-			return werr
 		}
 		fmt.Fprintf(out, "%s created %s (%d keys, mode 0600)\n", ui.Green("✓"), filepath.ToSlash(path), len(keys))
 		return nil
@@ -233,19 +225,13 @@ func writeOrAppend(path, header string, keys []dotenv.ExampleKey, out io.Writer,
 		fmt.Fprintf(out, "%s %s is complete\n", ui.Dim("="), filepath.ToSlash(path))
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
-	if err != nil {
-		return err
-	}
+	var b strings.Builder
 	if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
-		_, _ = io.WriteString(f, "\n")
+		b.WriteString("\n")
 	}
-	werr := dotenv.AppendKeys(f, missing)
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		return werr
+	_ = dotenv.AppendKeys(&b, missing) // strings.Builder never fails
+	if err := appendFile(path, []byte(b.String())); err != nil {
+		return err
 	}
 	names := make([]string, len(missing))
 	for i, k := range missing {
@@ -253,6 +239,33 @@ func writeOrAppend(path, header string, keys []dotenv.ExampleKey, out io.Writer,
 	}
 	fmt.Fprintf(out, "%s added %d keys to %s: %s\n", ui.Green("+"), len(missing), filepath.ToSlash(path), strings.Join(names, ", "))
 	return nil
+}
+
+// openFile is os.OpenFile; tests replace it to reach write failures.
+var openFile = os.OpenFile
+
+// writeNew creates path (failing if it exists) and writes b.
+func writeNew(path string, b []byte, perm os.FileMode) error {
+	f, err := openFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	return writeClose(f, b)
+}
+
+// appendFile appends b to an existing path.
+func appendFile(path string, b []byte) error {
+	f, err := openFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	return writeClose(f, b)
+}
+
+func writeClose(f *os.File, b []byte) error {
+	_, werr := f.Write(b)
+	cerr := f.Close()
+	return errors.Join(werr, cerr)
 }
 
 // keepConfigTracked refuses a generated file that is env4ci.yaml itself:

@@ -218,8 +218,10 @@ func newProvider(t target) (application.Provider, error) {
 }
 
 // vaultTokenFile reads ~/.vault-token, written by "vault login".
+var homeDir = os.UserHomeDir
+
 func vaultTokenFile() string {
-	home, err := os.UserHomeDir()
+	home, err := homeDir()
 	if err != nil {
 		return ""
 	}

@@ -97,6 +97,36 @@ targets:
 {{- end}}
 `))
 
+// config is the Config renderInit's YAML describes (tests assert they match).
+func (p initPlan) config() config.Config {
+	c := config.Config{
+		Default: "secret",
+		Rules: []config.Rule{
+			{Pattern: "*SECRET*", Type: "secret"}, {Pattern: "*PASSWORD*", Type: "secret"},
+			{Pattern: "*TOKEN*", Type: "secret"}, {Pattern: "*KEY*", Type: "secret"},
+			{Pattern: "APP_*", Type: "variable"}, {Pattern: "LOG_*", Type: "variable"},
+		},
+		AuthFile:     SecretsDir + "/env4ci.env",
+		Branches:     map[string]string{},
+		Environments: map[string]string{},
+	}
+	for _, e := range p.Environments {
+		c.Branches[branchFor(e)] = e
+		c.Environments[e] = envFileFor(e)
+	}
+	for _, t := range p.Targets {
+		switch t {
+		case "github":
+			c.Targets.GitHub = &config.GitHub{Repo: first(p.Repo, "owner/name")}
+		case "gitlab":
+			c.Targets.GitLab = &config.GitLab{Project: first(p.Repo, "group/project"), Protected: true}
+		case "vault":
+			c.Targets.Vault = &config.Vault{Address: first(p.VaultAddr, "https://vault.example.com:8200"), Mount: p.VaultMount, Path: p.VaultPath}
+		}
+	}
+	return c
+}
+
 func renderInit(p initPlan) ([]byte, error) {
 	if len(p.Targets) == 0 {
 		return nil, errors.New("init: at least one target (github, gitlab, vault)")
@@ -122,21 +152,10 @@ func renderInit(p initPlan) ([]byte, error) {
 		}
 		seen[b] = e
 	}
+	// Inputs are validated above; the template only formats strings into a
+	// buffer, so Execute cannot fail. Tests load every output with config.Load.
 	var buf bytes.Buffer
-	if err := initTmpl.Execute(&buf, p); err != nil {
-		return nil, err
-	}
-	// The output must load with the real config parser.
-	tmp, err := os.CreateTemp("", "env4ci-init-*.yaml")
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	_, _ = tmp.Write(buf.Bytes())
-	_ = tmp.Close()
-	if _, err := config.Load(tmp.Name()); err != nil {
-		return nil, fmt.Errorf("init: generated config is invalid: %w", err)
-	}
+	_ = initTmpl.Execute(&buf, p)
 	return buf.Bytes(), nil
 }
 
@@ -243,30 +262,18 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(o.config, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
+	if err := writeNew(o.config, b, 0o644); err != nil {
 		return err
 	}
 	ui := newPalette(out)
 	fmt.Fprintf(out, "%s wrote %s (targets: %s; environments: %s)\n", ui.Green("✓"), o.config, strings.Join(p.Targets, ", "), strings.Join(p.Environments, ", "))
 
-	cfg, err := config.Load(o.config)
-	if err != nil {
-		return err
-	}
-	if err := cmdGen(cfg, o, out); err != nil {
+	if err := cmdGen(p.config(), o, out); err != nil {
 		return err
 	}
 	if err := writeMakefile(filepath.Join(filepath.Dir(o.config), "Makefile"), out); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, ui.Dim("next: put tokens in "+cfg.AuthPath()+", fill the environment files, then run \"env4ci diff\""))
+	fmt.Fprintln(out, ui.Dim("next: put tokens in "+p.config().AuthPath()+", fill the environment files, then run \"env4ci diff\""))
 	return nil
 }

@@ -75,19 +75,32 @@ Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes.
 // errDrift signals diff --exit-code found changes.
 var errDrift = errors.New("changes detected")
 
+// Process seams; tests replace them to drive main.
+var (
+	exit             = os.Exit
+	stdin  io.Reader = os.Stdin
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
+)
+
 func main() {
 	httpx.UserAgent = "env4ci/" + version
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err := run(ctx, os.Args[1:], os.Stdin, os.Stdout)
+	err := run(ctx, os.Args[1:], stdin, stdout)
 	stop()
+	exit(exitCode(err, stderr))
+}
+
+// exitCode maps run's error to the process exit code: 0 ok, 2 drift, 1 error.
+func exitCode(err error, w io.Writer) int {
 	switch {
 	case err == nil:
+		return 0
 	case errors.Is(err, errDrift):
-		os.Exit(2)
-	default:
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		return 2
 	}
+	fmt.Fprintln(w, "error:", err)
+	return 1
 }
 
 type opts struct {
@@ -384,7 +397,7 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 		}
 		used[fileName(env)]++
 		path := filepath.Join(o.dir, name)
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := openFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if errors.Is(err, os.ErrExist) {
 			fmt.Fprintf(out, "- skipped %s (exists)\n", path)
 			continue
@@ -446,12 +459,7 @@ func envLabel(env string) string {
 }
 
 func cmdInit(o opts, out io.Writer) error {
-	f, err := os.OpenFile(o.config, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := io.WriteString(f, config.Template); err != nil {
+	if err := writeNew(o.config, []byte(config.Template), 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "✓ wrote", o.config)
@@ -527,13 +535,10 @@ func cmdPull(ctx context.Context, svc application.Service, o opts, out io.Writer
 	if err := keepConfigTracked(o.config, path); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	var b strings.Builder
+	_ = dotenv.Write(&b, entries) // strings.Builder never fails
+	if err := writeNew(path, []byte(b.String()), 0o600); err != nil {
 		return fmt.Errorf("%w (refusing to overwrite; use --out)", err)
-	}
-	defer f.Close()
-	if err := dotenv.Write(f, entries); err != nil {
-		return err
 	}
 	fmt.Fprintf(out, "✓ wrote %d values to %s (mode 0600)\n", len(entries), path)
 	if len(hidden) > 0 {
@@ -714,10 +719,14 @@ func confirm(in io.Reader, out io.Writer, prompt string) bool {
 }
 
 // ghCLIToken asks the GitHub CLI for its token; empty if gh is absent.
+var ghTokenCmd = func(ctx context.Context) ([]byte, error) {
+	return exec.CommandContext(ctx, "gh", "auth", "token").Output()
+}
+
 func ghCLIToken() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	b, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
+	b, err := ghTokenCmd(ctx)
 	if err != nil {
 		return ""
 	}

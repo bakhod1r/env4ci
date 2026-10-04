@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -110,5 +111,26 @@ func TestInitWizardWithFlags(t *testing.T) {
 	// Refuses to overwrite.
 	if err := cmdInitWizard(o, nil, &out, fakeGit{remote: ghRemote}, false); err == nil {
 		t.Fatal("want exists error")
+	}
+}
+
+func TestInitPlanConfigMatchesYAML(t *testing.T) {
+	for _, p := range []initPlan{
+		{Targets: []string{"github", "gitlab", "vault"}, Environments: []string{"production", "staging"}, Repo: "a/b", VaultAddr: "https://v", VaultMount: "kv", VaultPath: "b/{env}"},
+		{Targets: []string{"github", "gitlab", "vault"}, Environments: []string{"dev"}, VaultMount: "secret", VaultPath: "app/{env}"},
+	} {
+		b, err := renderInit(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := filepath.Join(t.TempDir(), "c.yaml")
+		os.WriteFile(f, b, 0o600)
+		loaded, err := config.Load(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(loaded, p.config()) {
+			t.Fatalf("yaml  %+v\nconfig %+v", loaded, p.config())
+		}
 	}
 }

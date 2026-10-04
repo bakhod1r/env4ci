@@ -1,4 +1,4 @@
-.PHONY: test lint build golden snapshot
+.PHONY: test lint build golden snapshot cover
 test:
 	go test -race ./...
 lint:
@@ -9,3 +9,6 @@ golden:
 	go test ./internal/infrastructure/ciscan ./cmd/env4ci -update
 snapshot:
 	goreleaser release --snapshot --clean
+cover:
+	go test -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out | awk '$$3 != "100.0%"'
