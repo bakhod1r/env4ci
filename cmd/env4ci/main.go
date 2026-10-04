@@ -41,6 +41,8 @@ Usage:
 
   Provider, repository and environment default to: git remote origin, and the
   current branch mapped through "branches:" in env4ci.yaml.
+  env4ci gen                        from env4ci.yaml: create .env.env4ci (tokens) and one
+                                    .env file per environment with keys CI uses
   env4ci verify                     log in with SSH keys / registry tokens from the .env file
   env4ci scan                       list variables CI files expect; --write creates .env examples
   env4ci version
@@ -116,7 +118,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.StringVar(&o.repo, "repo", "", "")
 	fs.BoolVar(&o.prune, "prune", false, "")
 	fs.BoolVar(&o.write, "write", false, "")
-	fs.StringVar(&o.dir, "dir", ".", "")
+	fs.StringVar(&o.dir, "dir", "", "")
 	fs.StringVar(&o.by, "by", "env", "")
 	fs.BoolVar(&o.exitCode, "exit-code", false, "")
 	fs.BoolVar(&o.shared, "shared", false, "")
@@ -165,7 +167,14 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	if err != nil {
 		return err
 	}
+	if cmd != "gen" {
+		if err := loadAuthFile(cfg, out); err != nil {
+			return err
+		}
+	}
 	switch cmd {
+	case "gen":
+		return cmdGen(cfg, o, out)
 	case "validate":
 		local, err := loadLocal(cfg, o)
 		if err != nil {
@@ -246,6 +255,9 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 	if err != nil {
 		return err
 	}
+	if filepath.Clean(t.File) == filepath.Clean(cfg.AuthPath()) {
+		return fmt.Errorf("refusing to sync %s: it holds env4ci's own tokens", t.File)
+	}
 	o.env, o.file = t.Environment, t.File
 	fmt.Fprintln(out, newPalette(out).Dim(t.Describe()))
 	p, err := newProvider(t)
@@ -298,7 +310,7 @@ func cmdScan(cfg config.Config, o opts, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	refs, err := ciscan.Scan(o.dir, cl)
+	refs, err := ciscan.Scan(first(o.dir, "."), cl)
 	if err != nil {
 		return err
 	}

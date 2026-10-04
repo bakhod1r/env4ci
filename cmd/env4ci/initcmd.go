@@ -8,8 +8,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
-	"sort"
 	"strings"
 	"text/template"
 
@@ -252,19 +250,13 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 	ui := newPalette(out)
 	fmt.Fprintf(out, "%s wrote %s (targets: %s; environments: %s)\n", ui.Green("✓"), o.config, strings.Join(p.Targets, ", "), strings.Join(p.Environments, ", "))
 
-	envs := append([]string(nil), p.Environments...)
-	sort.Strings(envs)
-	base := filepath.Dir(o.config)
-	for _, e := range envs {
-		name := envFileFor(e)
-		if fh, err := os.OpenFile(filepath.Join(base, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
-			_ = fh.Close()
-			fmt.Fprintf(out, "%s created empty %s (mode 0600)\n", ui.Green("✓"), name)
-		}
-		if added, err := ensureGitignored(filepath.Join(base, ".gitignore"), name); err == nil && added {
-			fmt.Fprintf(out, "%s added %s to .gitignore\n", ui.Green("✓"), name)
-		}
+	cfg, err := config.Load(o.config)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintln(out, ui.Dim("next: fill the .env files, then run \"env4ci diff\""))
+	if err := cmdGen(cfg, o, out); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, ui.Dim("next: put tokens in "+cfg.AuthPath()+", fill the environment files, then run \"env4ci diff\""))
 	return nil
 }

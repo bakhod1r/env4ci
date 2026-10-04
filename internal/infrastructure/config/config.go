@@ -26,6 +26,20 @@ type Config struct {
 	Environments map[string]string `yaml:"environments"`
 	// Checks configures credential verification before push.
 	Checks Checks `yaml:"checks"`
+	// AuthFile holds env4ci's own settings (tokens, Vault address). It is
+	// loaded at start-up and never synced. Default .env.env4ci.
+	AuthFile string `yaml:"auth_file"`
+}
+
+// DefaultAuthFile is used when auth_file is not set.
+const DefaultAuthFile = ".env.env4ci"
+
+// AuthPath returns the auth file path.
+func (c Config) AuthPath() string {
+	if c.AuthFile != "" {
+		return c.AuthFile
+	}
+	return DefaultAuthFile
 }
 
 // Checks name the variables that hold each credential. Each field is a
