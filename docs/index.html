@@ -132,13 +132,17 @@ targets:
     </div>
     <div>
       <h2>Commands</h2>
-      <p class="sub">Each provider command takes <code>github</code> or <code>gitlab</code>.</p>
+      <p class="sub">Provider commands take <code>github</code>, <code>gitlab</code> or <code>vault</code>; default comes from env4ci.yaml or git remote.</p>
       <table>
-        <tr><td>init</td><td>Write an env4ci.yaml template</td></tr>
-        <tr><td>validate</td><td>Show how each key is classified</td></tr>
+        <tr><td>init</td><td>Create env4ci.yaml (wizard on a terminal)</td></tr>
+        <tr><td>gen</td><td>Auth file + one gitignored env file per environment</td></tr>
+        <tr><td>scan</td><td>List variables the CI files use</td></tr>
+        <tr><td>verify</td><td>Log in with SSH keys and registry tokens</td></tr>
         <tr><td>diff &lt;p&gt;</td><td>Plan only. Never writes anything.</td></tr>
-        <tr><td>push &lt;p&gt;</td><td>Apply the plan after confirmation</td></tr>
+        <tr><td>push &lt;p&gt;</td><td>Verify, confirm, apply the plan</td></tr>
         <tr><td>pull &lt;p&gt;</td><td>Write readable remote values to a .env file</td></tr>
+        <tr><td>check &lt;p&gt;</td><td>Exit 2 if CI uses keys the provider lacks</td></tr>
+        <tr><td>makefile</td><td>Add make env-* targets</td></tr>
       </table>
       <div class="legend"><span><b class="a">+</b> new</span><span><b class="c">~</b> changed</span><span><b class="u">?</b> unverifiable (write-only secret)</span><span><b class="d">-</b> remote only</span></div>
     </div>
