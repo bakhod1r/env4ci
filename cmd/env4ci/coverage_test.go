@@ -153,9 +153,9 @@ func TestInitWizardErrors(t *testing.T) {
 		t.Fatal("bad target")
 	}
 
-	// gen fails: .env4ci exists as a file.
+	// gen fails: the auth file path is a directory.
 	d3 := t.TempDir()
-	os.WriteFile(filepath.Join(d3, ".env4ci"), nil, 0o600)
+	os.Mkdir(filepath.Join(d3, ".env.env4ci"), 0o755)
 	o3 := opts{config: filepath.Join(d3, "env4ci.yaml"), targets: "vault", envs: "production"}
 	if err := cmdInitWizard(o3, nil, io.Discard, noGit, false); err == nil {
 		t.Fatal("gen failure must surface")
@@ -696,8 +696,8 @@ func TestDiffPruneInSync(t *testing.T) {
 func TestProtectFolderErrors(t *testing.T) {
 	base := t.TempDir()
 	os.WriteFile(filepath.Join(base, "blk"), nil, 0o600)
-	if err := protect(base, "blk/a.env", io.Discard, palette{}); err == nil || !strings.Contains(err.Error(), "cannot create folder") {
-		t.Fatalf("folder is a file: %v", err)
+	if err := protect(base, "blk/a.env", io.Discard, palette{}); err == nil {
+		t.Fatal("folder is a file: want error")
 	}
 	if err := protect(base, "blk/sub/a.env", io.Discard, palette{}); err == nil {
 		t.Fatal("parent is a file: want error")

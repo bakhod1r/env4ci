@@ -1,4 +1,6 @@
-✓ added /.env4ci/ to .gitignore
+✓ added /.env4ci/env4ci.env to .gitignore
 ✓ created <dir>/.env4ci/env4ci.env (4 keys, mode 0600)
+✓ added /.env4ci/production.env to .gitignore
 ✓ created <dir>/.env4ci/production.env (14 keys, mode 0600)
+✓ added /.env4ci/staging.env to .gitignore
 ✓ created <dir>/.env4ci/staging.env (9 keys, mode 0600)

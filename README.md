@@ -22,12 +22,12 @@ gh attestation verify env4ci_*_linux_amd64.tar.gz --repo bakhod1r/env4ci
 ```bash
 env4ci init                                  # asks: targets, environments, repo, Vault path
 env4ci init --targets github,vault --envs production,staging   # same, no prompts
-# init writes env4ci.yaml (commit it), then runs "env4ci gen" next to your CI files:
-#   .github/env4ci/env4ci.env       env4ci's own settings: GITHUB_TOKEN / GITLAB_TOKEN / VAULT_ADDR / VAULT_TOKEN
-#   .github/env4ci/production.env   CI/CD variables, keys pre-filled from your workflow / .gitlab-ci.yml files
-#   .github/env4ci/staging.env      ...
-# (.gitlab/env4ci/ for GitLab projects, .env4ci/ for Vault-only.) Only that folder is gitignored,
-# created 0700, before any file is written; the rest of .github/ stays tracked.
+# init writes env4ci.yaml (commit it), then runs "env4ci gen" in your CI folder:
+#   .github/env4ci.env       env4ci's own settings: GITHUB_TOKEN / GITLAB_TOKEN / VAULT_ADDR / VAULT_TOKEN
+#   .github/production.env   CI/CD variables, keys pre-filled from your workflow / .gitlab-ci.yml files
+#   .github/staging.env      ...
+# (.gitlab/ for GitLab projects; .env.env4ci / .env.<env> at the root for Vault-only.)
+# Each file is added to .gitignore (mode 0600) before it is written; .github/ itself stays tracked.
 env4ci diff                                  # current branch -> environment (main -> production)
 env4ci push                                  # verifies SSH/registry credentials, asks, writes
 env4ci push --all                            # every environment
@@ -55,11 +55,11 @@ env4ci scan -f .env --write      # find vars CI files use, write .env examples
 
 | File | Holds | Used by |
 |------|-------|---------|
-| `.github/env4ci/env4ci.env` (`auth_file:`) | tokens and addresses for the configured targets | env4ci itself; loaded at start, real env vars win, never synced |
-| `.github/env4ci/<env>.env` (`environments:`) | variables your pipelines read, found by `scan` | `diff` / `push` |
+| `.github/env4ci.env` (`auth_file:`) | tokens and addresses for the configured targets | env4ci itself; loaded at start, real env vars win, never synced |
+| `.github/<env>.env` (`environments:`) | variables your pipelines read, found by `scan` | `diff` / `push` |
 
-Before writing, the files' own folder (e.g. `/.github/env4ci/`, never all of `.github/`) is added to the
-root `.gitignore` (files configured at the top level are ignored one by one). Existing values are never touched; keys a file lacks are appended under `# --- added by env4ci gen ---`.
+Before writing, every generated file is added to the root `.gitignore` by exact path
+(`/.github/production.env`), never by folder, so workflows next to them stay tracked. Existing values are never touched; keys a file lacks are appended under `# --- added by env4ci gen ---`.
 Run it again after changing CI files. The auth file accepts only env4ci settings, and `push` refuses to use it as a source.
 
 ## HashiCorp Vault

@@ -279,30 +279,24 @@ func keepConfigTracked(configPath, file string) error {
 	return nil
 }
 
-// protect makes sure file can never be committed before it is written.
-// A file inside a folder: that folder (not its parents, e.g. never all of
-// .github/) is created 0700 and "/<folder>/" goes into the root .gitignore.
-// A file at the top level: the file itself goes into the root .gitignore.
+// protect makes sure file can never be committed before it is written:
+// the exact file path goes into the root .gitignore (never its folder, so
+// .github/ and .gitlab/ stay tracked) and missing parent folders are created.
 func protect(base, file string, out io.Writer, ui palette) error {
 	file = filepath.ToSlash(filepath.Clean(file))
-	dir, _ := filepath.Split(file)
-	dir = strings.TrimSuffix(dir, "/")
-	if dir == "" {
-		return gitignoreAdd(base, file, out, ui)
-	}
-	if strings.HasPrefix(dir, "..") || filepath.IsAbs(file) {
+	if strings.HasPrefix(file, "..") || filepath.IsAbs(file) {
 		return nil // outside the project: nothing to ignore here
 	}
-	full := filepath.Join(base, filepath.FromSlash(dir))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil { // #nosec G301 -- parents like .github hold committed files
-		return err
-	}
-	if err := os.Mkdir(full, 0o700); err != nil {
-		if st, serr := os.Stat(full); serr != nil || !st.IsDir() {
-			return fmt.Errorf("%s: cannot create folder (%w)", dir, err)
+	if dir := filepath.Dir(filepath.Join(base, filepath.FromSlash(file))); dir != base {
+		if err := os.MkdirAll(dir, 0o755); err != nil { // #nosec G301 -- .github/.gitlab hold committed files
+			return err
 		}
 	}
-	return gitignoreAdd(base, "/"+dir+"/", out, ui)
+	entry := file
+	if strings.Contains(file, "/") {
+		entry = "/" + file // anchored: only this path
+	}
+	return gitignoreAdd(base, entry, out, ui)
 }
 
 func gitignoreAdd(base, entry string, out io.Writer, ui palette) error {

@@ -17,7 +17,7 @@ import (
 
 // initPlan is everything "env4ci init" writes into env4ci.yaml.
 type initPlan struct {
-	Dir          string   // folder for generated files (see secretsDirFor)
+	Dir          string   // folder for generated files (see secretsDirFor); "" = root
 	remote       string   // git remote provider, decides Dir
 	Targets      []string // github, gitlab, vault
 	Environments []string // one or many
@@ -38,29 +38,40 @@ func branchFor(env string) string {
 	return env
 }
 
-// SecretsDir is the generated-files folder when no CI folder fits.
-const SecretsDir = ".env4ci"
-
-// secretsDirFor puts generated files next to the CI files: .github/env4ci
-// for GitHub, .gitlab/env4ci for GitLab (the git remote decides when both
-// are targets), else .env4ci. The folder itself is gitignored.
+// secretsDirFor puts generated files in the CI folder itself: .github for
+// GitHub, .gitlab for GitLab (the git remote decides when both are
+// targets), or the project root for Vault-only. Each file is gitignored.
 func secretsDirFor(targets []string, remoteProvider string) string {
 	has := func(t string) bool { return contains(targets, t) }
 	switch {
 	case has(remoteProvider) && remoteProvider == "gitlab":
-		return ".gitlab/env4ci"
+		return ".gitlab"
 	case has("github"):
-		return ".github/env4ci"
+		return ".github"
 	case has("gitlab"):
-		return ".gitlab/env4ci"
+		return ".gitlab"
 	}
-	return SecretsDir
+	return ""
 }
 
-func envFileFor(dir, env string) string { return dir + "/" + env + ".env" }
+// envFileFor: <dir>/<env>.env, or .env.<env> at the project root.
+func envFileFor(dir, env string) string {
+	if dir == "" {
+		return ".env." + env
+	}
+	return dir + "/" + env + ".env"
+}
+
+// authFileFor: <dir>/env4ci.env, or .env.env4ci at the project root.
+func authFileFor(dir string) string {
+	if dir == "" {
+		return config.DefaultAuthFile
+	}
+	return dir + "/env4ci.env"
+}
 
 var initTmpl = template.Must(template.New("init").Funcs(template.FuncMap{
-	"branch": branchFor, "file": envFileFor, "q": func(s string) string { return fmt.Sprintf("%q", s) },
+	"branch": branchFor, "file": envFileFor, "auth": authFileFor, "q": func(s string) string { return fmt.Sprintf("%q", s) },
 	"has": func(xs []string, x string) bool {
 		for _, v := range xs {
 			if v == x {
@@ -88,10 +99,10 @@ branches:
   {{branch . | q}}: {{.}}
 {{- end}}
 
-# env4ci's own tokens/addresses (generated, gitignored with the folder).
-auth_file: {{.Dir}}/env4ci.env
+# env4ci's own tokens/addresses (generated, gitignored).
+auth_file: {{auth .Dir}}
 
-# Environment -> local file. {{.Dir}}/ is gitignored (only that folder).
+# Environment -> local file. Each file is gitignored; the folder stays tracked.
 environments:
 {{- range .Environments}}
   {{.}}: {{file $.Dir .}}
@@ -117,9 +128,7 @@ targets:
 
 // config is the Config renderInit's YAML describes (tests assert they match).
 func (p initPlan) config() config.Config {
-	if p.Dir == "" {
-		p.Dir = secretsDirFor(p.Targets, p.remote)
-	}
+	p.Dir = secretsDirFor(p.Targets, p.remote)
 	c := config.Config{
 		Default: "secret",
 		Rules: []config.Rule{
@@ -127,7 +136,7 @@ func (p initPlan) config() config.Config {
 			{Pattern: "*TOKEN*", Type: "secret"}, {Pattern: "*KEY*", Type: "secret"},
 			{Pattern: "APP_*", Type: "variable"}, {Pattern: "LOG_*", Type: "variable"},
 		},
-		AuthFile:     p.Dir + "/env4ci.env",
+		AuthFile:     authFileFor(p.Dir),
 		Branches:     map[string]string{},
 		Environments: map[string]string{},
 	}
@@ -149,9 +158,7 @@ func (p initPlan) config() config.Config {
 }
 
 func renderInit(p initPlan) ([]byte, error) {
-	if p.Dir == "" {
-		p.Dir = secretsDirFor(p.Targets, p.remote)
-	}
+	p.Dir = secretsDirFor(p.Targets, p.remote)
 	if len(p.Targets) == 0 {
 		return nil, errors.New("init: at least one target (github, gitlab, vault)")
 	}

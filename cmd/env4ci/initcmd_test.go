@@ -45,7 +45,7 @@ func TestRenderInitLoadsAsConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Branches["main"] != "production" || c.Branches["develop"] != "staging" ||
-		c.Environments["staging"] != ".gitlab/env4ci/staging.env" || c.AuthFile != ".gitlab/env4ci/env4ci.env" || c.Targets.Vault.Path != "p/{env}" ||
+		c.Environments["staging"] != ".gitlab/staging.env" || c.AuthFile != ".gitlab/env4ci.env" || c.Targets.Vault.Path != "p/{env}" ||
 		c.Targets.GitLab.Project != "g/p" || !c.Targets.GitLab.Protected || c.Targets.GitHub != nil {
 		t.Fatalf("%+v", c)
 	}
@@ -81,8 +81,8 @@ func TestAskInit(t *testing.T) {
 func TestInitWizardWithFlags(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "env4ci.yaml")
-	os.MkdirAll(filepath.Join(dir, ".gitlab", "env4ci"), 0o700)
-	os.WriteFile(filepath.Join(dir, ".gitlab", "env4ci", "production.env"), []byte("KEEP=1\n"), 0o600)
+	os.MkdirAll(filepath.Join(dir, ".gitlab"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".gitlab", "production.env"), []byte("KEEP=1\n"), 0o600)
 	var out bytes.Buffer
 	o := opts{config: cfg, targets: "gitlab,vault", envs: "production,staging"}
 	if err := cmdInitWizard(o, nil, &out, fakeGit{remote: ghRemote}, false); err != nil {
@@ -95,17 +95,17 @@ func TestInitWizardWithFlags(t *testing.T) {
 	if c.Targets.GitLab.Project != "acme/api" || c.Targets.Vault.Path != "api/{env}" {
 		t.Fatalf("%+v", c.Targets)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, ".gitlab", "env4ci", "production.env")); !strings.HasPrefix(string(b), "KEEP=1\n") {
+	if b, _ := os.ReadFile(filepath.Join(dir, ".gitlab", "production.env")); !strings.HasPrefix(string(b), "KEEP=1\n") {
 		t.Fatal("existing .env overwritten")
 	}
-	if st, err := os.Stat(filepath.Join(dir, ".gitlab", "env4ci", "staging.env")); err != nil || (st.Mode().Perm()&0o077 != 0 && os.PathSeparator == '/') {
+	if st, err := os.Stat(filepath.Join(dir, ".gitlab", "staging.env")); err != nil || (st.Mode().Perm()&0o077 != 0 && os.PathSeparator == '/') {
 		t.Fatalf("staging.env: %v %v", st, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".gitlab", "env4ci", "env4ci.env")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, ".gitlab", "env4ci.env")); err != nil {
 		t.Fatal("auth file missing")
 	}
 	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if string(gi) != "/.gitlab/env4ci/\n" {
+	if string(gi) != "/.gitlab/env4ci.env\n/.gitlab/production.env\n/.gitlab/staging.env\n" {
 		t.Fatalf(".gitignore:\n%s", gi)
 	}
 	// Refuses to overwrite.
@@ -141,12 +141,12 @@ func TestSecretsDirFor(t *testing.T) {
 		remote  string
 		want    string
 	}{
-		{[]string{"github"}, "", ".github/env4ci"},
-		{[]string{"gitlab"}, "", ".gitlab/env4ci"},
-		{[]string{"github", "gitlab"}, "gitlab", ".gitlab/env4ci"},
-		{[]string{"github", "gitlab"}, "github", ".github/env4ci"},
-		{[]string{"gitlab", "vault"}, "github", ".gitlab/env4ci"},
-		{[]string{"vault"}, "github", ".env4ci"},
+		{[]string{"github"}, "", ".github"},
+		{[]string{"gitlab"}, "", ".gitlab"},
+		{[]string{"github", "gitlab"}, "gitlab", ".gitlab"},
+		{[]string{"github", "gitlab"}, "github", ".github"},
+		{[]string{"gitlab", "vault"}, "github", ".gitlab"},
+		{[]string{"vault"}, "github", ""},
 	} {
 		if got := secretsDirFor(tc.targets, tc.remote); got != tc.want {
 			t.Errorf("%v remote=%q: %q want %q", tc.targets, tc.remote, got, tc.want)

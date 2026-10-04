@@ -17,14 +17,14 @@ branches:
   "develop": staging
   "dev": dev
 
-# env4ci's own tokens/addresses (generated, gitignored with the folder).
-auth_file: .github/env4ci/env4ci.env
+# env4ci's own tokens/addresses (generated, gitignored).
+auth_file: .github/env4ci.env
 
-# Environment -> local file. .github/env4ci/ is gitignored (only that folder).
+# Environment -> local file. Each file is gitignored; the folder stays tracked.
 environments:
-  production: .github/env4ci/production.env
-  staging: .github/env4ci/staging.env
-  dev: .github/env4ci/dev.env
+  production: .github/production.env
+  staging: .github/staging.env
+  dev: .github/dev.env
 
 targets:
   github:

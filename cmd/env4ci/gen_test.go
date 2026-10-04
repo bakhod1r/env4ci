@@ -45,14 +45,8 @@ func TestGenGolden(t *testing.T) {
 		golden(t, "gen/"+f, string(b))
 	}
 	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if strings.Count(string(gi), "/.env4ci/\n") != 1 {
-		t.Errorf("folder not gitignored exactly once:\n%s", gi)
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".env4ci", ".gitignore")); err == nil {
-		t.Error("no .gitignore inside .env4ci/ expected")
-	}
-	if st, err := os.Stat(filepath.Join(dir, ".env4ci")); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o700) {
-		t.Errorf("folder: %v %v", st, err)
+	if string(gi) != "/.env4ci/env4ci.env\n/.env4ci/production.env\n/.env4ci/staging.env\n" {
+		t.Errorf(".gitignore must list each env file:\n%s", gi)
 	}
 
 	// Second run changes nothing.
@@ -143,7 +137,7 @@ func TestProtect(t *testing.T) {
 		}
 	}
 	gi, _ := os.ReadFile(filepath.Join(base, ".gitignore"))
-	if string(gi) != "top.env\n/secrets/a/\n/secrets/\n" {
+	if string(gi) != "top.env\n/secrets/a/b.env\n/secrets/c.env\n" {
 		t.Fatalf(".gitignore = %q", gi)
 	}
 	if _, err := os.Stat(filepath.Join(base, "secrets", "a")); err != nil {
@@ -235,18 +229,16 @@ func TestEnvFileKeysGroupsSSHAndRegistry(t *testing.T) {
 
 func TestProtectNeverIgnoresWholeCIFolder(t *testing.T) {
 	base := t.TempDir()
-	if err := protect(base, ".github/env4ci/production.env", io.Discard, palette{}); err != nil {
+	if err := protect(base, ".github/production.env", io.Discard, palette{}); err != nil {
 		t.Fatal(err)
 	}
 	gi, _ := os.ReadFile(filepath.Join(base, ".gitignore"))
-	if string(gi) != "/.github/env4ci/\n" {
+	if string(gi) != "/.github/production.env\n" {
 		t.Fatalf(".gitignore = %q", gi)
 	}
 	if runtime.GOOS != "windows" {
-		gh, _ := os.Stat(filepath.Join(base, ".github"))
-		inner, _ := os.Stat(filepath.Join(base, ".github", "env4ci"))
-		if gh.Mode().Perm() != 0o755 || inner.Mode().Perm() != 0o700 {
-			t.Fatalf(".github %v, env4ci %v", gh.Mode().Perm(), inner.Mode().Perm())
+		if gh, _ := os.Stat(filepath.Join(base, ".github")); gh.Mode().Perm() != 0o755 {
+			t.Fatalf(".github %v", gh.Mode().Perm())
 		}
 	}
 }
