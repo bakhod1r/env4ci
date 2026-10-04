@@ -16,11 +16,11 @@ branches:
   "main": production
 
 # env4ci's own tokens/addresses (generated, gitignored with the folder).
-auth_file: .env4ci/env4ci.env
+auth_file: .github/env4ci/env4ci.env
 
-# Environment -> local file. Everything in .env4ci/ is gitignored.
+# Environment -> local file. .github/env4ci/ is gitignored (only that folder).
 environments:
-  production: .env4ci/production.env
+  production: .github/env4ci/production.env
 
 targets:
   github:

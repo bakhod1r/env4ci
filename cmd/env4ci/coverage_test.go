@@ -692,3 +692,14 @@ func TestDiffPruneInSync(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestProtectFolderErrors(t *testing.T) {
+	base := t.TempDir()
+	os.WriteFile(filepath.Join(base, "blk"), nil, 0o600)
+	if err := protect(base, "blk/a.env", io.Discard, palette{}); err == nil || !strings.Contains(err.Error(), "cannot create folder") {
+		t.Fatalf("folder is a file: %v", err)
+	}
+	if err := protect(base, "blk/sub/a.env", io.Discard, palette{}); err == nil {
+		t.Fatal("parent is a file: want error")
+	}
+}

@@ -280,8 +280,8 @@ func keepConfigTracked(configPath, file string) error {
 }
 
 // protect makes sure file can never be committed before it is written.
-// A file inside a folder: the folder is created (0700) and "/<folder>/"
-// goes into the root .gitignore.
+// A file inside a folder: that folder (not its parents, e.g. never all of
+// .github/) is created 0700 and "/<folder>/" goes into the root .gitignore.
 // A file at the top level: the file itself goes into the root .gitignore.
 func protect(base, file string, out io.Writer, ui palette) error {
 	file = filepath.ToSlash(filepath.Clean(file))
@@ -290,15 +290,19 @@ func protect(base, file string, out io.Writer, ui palette) error {
 	if dir == "" {
 		return gitignoreAdd(base, file, out, ui)
 	}
-	top := strings.SplitN(dir, "/", 2)[0]
-	if top == ".." || filepath.IsAbs(file) {
+	if strings.HasPrefix(dir, "..") || filepath.IsAbs(file) {
 		return nil // outside the project: nothing to ignore here
 	}
 	full := filepath.Join(base, filepath.FromSlash(dir))
-	if err := os.MkdirAll(full, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil { // #nosec G301 -- parents like .github hold committed files
 		return err
 	}
-	return gitignoreAdd(base, "/"+top+"/", out, ui)
+	if err := os.Mkdir(full, 0o700); err != nil {
+		if st, serr := os.Stat(full); serr != nil || !st.IsDir() {
+			return fmt.Errorf("%s: cannot create folder (%w)", dir, err)
+		}
+	}
+	return gitignoreAdd(base, "/"+dir+"/", out, ui)
 }
 
 func gitignoreAdd(base, entry string, out io.Writer, ui palette) error {

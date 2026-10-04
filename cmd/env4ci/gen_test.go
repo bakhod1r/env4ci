@@ -143,7 +143,7 @@ func TestProtect(t *testing.T) {
 		}
 	}
 	gi, _ := os.ReadFile(filepath.Join(base, ".gitignore"))
-	if string(gi) != "top.env\n/secrets/\n" {
+	if string(gi) != "top.env\n/secrets/a/\n/secrets/\n" {
 		t.Fatalf(".gitignore = %q", gi)
 	}
 	if _, err := os.Stat(filepath.Join(base, "secrets", "a")); err != nil {
@@ -230,5 +230,23 @@ func TestEnvFileKeysGroupsSSHAndRegistry(t *testing.T) {
 	want := "ssh:SSH_HOST ssh:SSH_PRIVATE_KEY ssh:SSH_USER ssh:SSH_KNOWN_HOSTS registry:GHCR_TOKEN environment production:DATABASE_URL shared:CODECOV_TOKEN"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("got  %s\nwant %s", strings.Join(got, " "), want)
+	}
+}
+
+func TestProtectNeverIgnoresWholeCIFolder(t *testing.T) {
+	base := t.TempDir()
+	if err := protect(base, ".github/env4ci/production.env", io.Discard, palette{}); err != nil {
+		t.Fatal(err)
+	}
+	gi, _ := os.ReadFile(filepath.Join(base, ".gitignore"))
+	if string(gi) != "/.github/env4ci/\n" {
+		t.Fatalf(".gitignore = %q", gi)
+	}
+	if runtime.GOOS != "windows" {
+		gh, _ := os.Stat(filepath.Join(base, ".github"))
+		inner, _ := os.Stat(filepath.Join(base, ".github", "env4ci"))
+		if gh.Mode().Perm() != 0o755 || inner.Mode().Perm() != 0o700 {
+			t.Fatalf(".github %v, env4ci %v", gh.Mode().Perm(), inner.Mode().Perm())
+		}
 	}
 }

@@ -17,6 +17,8 @@ import (
 
 // initPlan is everything "env4ci init" writes into env4ci.yaml.
 type initPlan struct {
+	Dir          string   // folder for generated files (see secretsDirFor)
+	remote       string   // git remote provider, decides Dir
 	Targets      []string // github, gitlab, vault
 	Environments []string // one or many
 	Repo         string   // owner/name or group/project
@@ -36,13 +38,29 @@ func branchFor(env string) string {
 	return env
 }
 
-// SecretsDir holds every generated file; it is gitignored as a whole.
+// SecretsDir is the generated-files folder when no CI folder fits.
 const SecretsDir = ".env4ci"
 
-func envFileFor(env string) string { return SecretsDir + "/" + env + ".env" }
+// secretsDirFor puts generated files next to the CI files: .github/env4ci
+// for GitHub, .gitlab/env4ci for GitLab (the git remote decides when both
+// are targets), else .env4ci. The folder itself is gitignored.
+func secretsDirFor(targets []string, remoteProvider string) string {
+	has := func(t string) bool { return contains(targets, t) }
+	switch {
+	case has(remoteProvider) && remoteProvider == "gitlab":
+		return ".gitlab/env4ci"
+	case has("github"):
+		return ".github/env4ci"
+	case has("gitlab"):
+		return ".gitlab/env4ci"
+	}
+	return SecretsDir
+}
+
+func envFileFor(dir, env string) string { return dir + "/" + env + ".env" }
 
 var initTmpl = template.Must(template.New("init").Funcs(template.FuncMap{
-	"branch": branchFor, "file": envFileFor, "authFile": func() string { return SecretsDir + "/env4ci.env" }, "q": func(s string) string { return fmt.Sprintf("%q", s) },
+	"branch": branchFor, "file": envFileFor, "q": func(s string) string { return fmt.Sprintf("%q", s) },
 	"has": func(xs []string, x string) bool {
 		for _, v := range xs {
 			if v == x {
@@ -71,12 +89,12 @@ branches:
 {{- end}}
 
 # env4ci's own tokens/addresses (generated, gitignored with the folder).
-auth_file: {{authFile}}
+auth_file: {{.Dir}}/env4ci.env
 
-# Environment -> local file. Everything in .env4ci/ is gitignored.
+# Environment -> local file. {{.Dir}}/ is gitignored (only that folder).
 environments:
 {{- range .Environments}}
-  {{.}}: {{file .}}
+  {{.}}: {{file $.Dir .}}
 {{- end}}
 
 targets:
@@ -99,6 +117,9 @@ targets:
 
 // config is the Config renderInit's YAML describes (tests assert they match).
 func (p initPlan) config() config.Config {
+	if p.Dir == "" {
+		p.Dir = secretsDirFor(p.Targets, p.remote)
+	}
 	c := config.Config{
 		Default: "secret",
 		Rules: []config.Rule{
@@ -106,13 +127,13 @@ func (p initPlan) config() config.Config {
 			{Pattern: "*TOKEN*", Type: "secret"}, {Pattern: "*KEY*", Type: "secret"},
 			{Pattern: "APP_*", Type: "variable"}, {Pattern: "LOG_*", Type: "variable"},
 		},
-		AuthFile:     SecretsDir + "/env4ci.env",
+		AuthFile:     p.Dir + "/env4ci.env",
 		Branches:     map[string]string{},
 		Environments: map[string]string{},
 	}
 	for _, e := range p.Environments {
 		c.Branches[branchFor(e)] = e
-		c.Environments[e] = envFileFor(e)
+		c.Environments[e] = envFileFor(p.Dir, e)
 	}
 	for _, t := range p.Targets {
 		switch t {
@@ -128,6 +149,9 @@ func (p initPlan) config() config.Config {
 }
 
 func renderInit(p initPlan) ([]byte, error) {
+	if p.Dir == "" {
+		p.Dir = secretsDirFor(p.Targets, p.remote)
+	}
 	if len(p.Targets) == 0 {
 		return nil, errors.New("init: at least one target (github, gitlab, vault)")
 	}
@@ -185,6 +209,7 @@ func defaultsFromGit(git gitReader) initPlan {
 	p := initPlan{Targets: []string{"github"}, Environments: []string{"production"}, VaultMount: "secret"}
 	if r, err := git.Remote(); err == nil {
 		p.Repo = r.Path
+		p.remote = r.Provider
 		if r.Provider != "" {
 			p.Targets = []string{r.Provider}
 		}
