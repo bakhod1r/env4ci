@@ -26,11 +26,32 @@ archives:
 checksum:
   name_template: checksums.txt
 
+release:
+  header: |
+    Install (no Go needed):
+
+    ```sh
+    curl -sSfL https://raw.githubusercontent.com/bakhod1r/env4ci/main/install.sh | sh
+    ```
+
+    GitHub Actions: `uses: bakhod1r/env4ci@v0` · binaries below, verify with `checksums.txt`.
+
 changelog:
-  use: github
+  use: git
   sort: asc
+  abbrev: 7
+  format: "{{ .SHA }} {{ .Message }}"
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Other
+      order: 999
   filters:
-    exclude: ["^docs:", "^test:", "^chore:"]
+    exclude: ['^docs(\(.+\))?:', '^test(\(.+\))?:', '^chore(\(.+\))?:', '^ci(\(.+\))?:']
 
 # Tap and bucket pushes need a PAT with contents:write on those repos
 # (secrets HOMEBREW_TAP_TOKEN / SCOOP_BUCKET_TOKEN). Without it they are skipped.
