@@ -150,3 +150,52 @@ func TestProtect(t *testing.T) {
 		t.Fatal("nested folder not created")
 	}
 }
+
+func TestConfigNeverGitignored(t *testing.T) {
+	// The normal layout keeps env4ci.yaml out of .gitignore.
+	dir, cfgPath := genProject(t)
+	if err := run(context.Background(), []string{"gen", "-c", cfgPath, "--dir", dir}, nil, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if strings.Contains(string(gi), "env4ci.yaml") {
+		t.Fatalf(".gitignore lists the config:\n%s", gi)
+	}
+
+	for name, tc := range map[string]struct{ cfgRel, yaml string }{
+		"environment file is the config": {"env4ci.yaml", "environments: { production: env4ci.yaml }\ntargets: { github: { repo: a/b } }\n"},
+		"auth file is the config":        {"env4ci.yaml", "auth_file: env4ci.yaml\ntargets: { github: { repo: a/b } }\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, tc.cfgRel)
+			os.MkdirAll(filepath.Dir(cfgPath), 0o700)
+			os.WriteFile(cfgPath, []byte(tc.yaml), 0o644)
+			err := run(context.Background(), []string{"gen", "-c", cfgPath, "--dir", dir}, nil, io.Discard)
+			if err == nil {
+				t.Fatal("want error")
+			}
+			if gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore")); len(gi) != 0 {
+				t.Fatalf(".gitignore written despite error:\n%s", gi)
+			}
+			if b, _ := os.ReadFile(cfgPath); string(b) != tc.yaml {
+				t.Fatal("config modified")
+			}
+		})
+	}
+}
+
+func TestKeepConfigTracked(t *testing.T) {
+	d := t.TempDir()
+	cfg := filepath.Join(d, "env4ci.yaml")
+	for file, ok := range map[string]bool{
+		filepath.Join(d, ".env4ci", "p.env"): true,
+		filepath.Join(d, "p.env"):            true,
+		cfg:                                  false,
+		filepath.Join(d, "..", "x.env"):      true,
+	} {
+		if err := keepConfigTracked(cfg, file); (err == nil) != ok {
+			t.Errorf("%s: err=%v", file, err)
+		}
+	}
+}

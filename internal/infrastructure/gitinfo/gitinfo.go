@@ -122,3 +122,10 @@ func git(dir string, args ...string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// IsIgnored reports whether git would ignore path (false outside a repo or
+// when git is missing).
+func IsIgnored(dir, path string) bool {
+	_, err := git(dir, "check-ignore", "-q", "--no-index", path)
+	return err == nil
+}

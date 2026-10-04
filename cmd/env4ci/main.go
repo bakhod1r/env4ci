@@ -496,6 +496,9 @@ func cmdPull(ctx context.Context, svc application.Service, o opts, out io.Writer
 	for _, r := range known {
 		entries = append(entries, dotenv.Entry{Key: r.Key, Value: r.Value})
 	}
+	if err := keepConfigTracked(o.config, path); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("%w (refusing to overwrite; use --out)", err)

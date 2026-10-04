@@ -76,6 +76,10 @@ func TestReadFromRealRepo(t *testing.T) {
 	if err != nil || r.Path != "team/app" || r.Provider != "gitlab" {
 		t.Fatalf("remote = %+v, err = %v", r, err)
 	}
+	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("/secret/\n"), 0o644)
+	if !IsIgnored(dir, "secret/x.env") || IsIgnored(dir, "env4ci.yaml") {
+		t.Fatal("IsIgnored wrong")
+	}
 	b, err := CurrentBranch(sub)
 	if err != nil || b != "develop" {
 		t.Fatalf("branch = %q, err = %v", b, err)

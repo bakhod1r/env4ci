@@ -15,6 +15,7 @@ import (
 	"github.com/bakhod1r/env4ci/internal/infrastructure/ciscan"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/dotenv"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/gitinfo"
 )
 
 // loadAuthFile sets env4ci's own settings (tokens, addresses) from the auth
@@ -67,6 +68,12 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		authKeys = append(authKeys, dotenv.ExampleKey{Key: k.Name, Kind: k.Comment})
 	}
 	authPath := cfg.AuthPath()
+	// Validate every target path before anything is written.
+	for _, f := range append([]string{authPath}, mapValues(cfg.Environments)...) {
+		if err := keepConfigTracked(o.config, filepath.Join(base, f)); err != nil {
+			return err
+		}
+	}
 	if err := protect(base, authPath, out, ui); err != nil {
 		return err
 	}
@@ -131,7 +138,19 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 	if len(refs) == 0 {
 		fmt.Fprintln(out, ui.Dim("no CI files found: environment files have no pre-filled keys"))
 	}
+	if gitinfo.IsIgnored(base, o.config) {
+		fmt.Fprintf(out, "%s %s is gitignored; it holds no secrets and should be committed (check .gitignore)\n", ui.Yellow("!"), o.config)
+	}
 	return nil
+}
+
+func mapValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // writeOrAppend creates path (0600) with keys, or appends the keys it lacks.
@@ -192,6 +211,17 @@ func writeOrAppend(path, header string, keys []dotenv.ExampleKey, out io.Writer,
 		names[i] = k.Key
 	}
 	fmt.Fprintf(out, "%s added %d keys to %s: %s\n", ui.Green("+"), len(missing), filepath.ToSlash(path), strings.Join(names, ", "))
+	return nil
+}
+
+// keepConfigTracked refuses a generated file that is env4ci.yaml itself:
+// writing keys into it and gitignoring it would remove the config from git.
+func keepConfigTracked(configPath, file string) error {
+	cfgAbs, err1 := filepath.Abs(configPath)
+	fileAbs, err2 := filepath.Abs(file)
+	if err1 == nil && err2 == nil && cfgAbs == fileAbs {
+		return fmt.Errorf("%s is the env4ci config; it must stay in git, use another file name", file)
+	}
 	return nil
 }
 
