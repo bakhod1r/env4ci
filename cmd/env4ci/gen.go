@@ -65,7 +65,7 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 	// 1. env4ci's own settings.
 	var authKeys []dotenv.ExampleKey
 	for _, k := range application.AuthKeys(targets) {
-		authKeys = append(authKeys, dotenv.ExampleKey{Key: k.Name, Kind: k.Comment})
+		authKeys = append(authKeys, dotenv.ExampleKey{Key: k.Name, Kind: k.Comment, Group: k.Target})
 	}
 	authPath := cfg.AuthPath()
 	// Validate every target path before anything is written.
@@ -122,7 +122,7 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 			if r.Environment == "" {
 				scope = "shared"
 			}
-			keys = append(keys, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String() + " · " + scope, Stages: r.Stages, Branches: r.Branches, Sources: r.Sources})
+			keys = append(keys, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String() + " · " + scope, Stages: r.Stages, Branches: r.Branches, Sources: r.Sources, Group: scope})
 		}
 		header := "CI/CD variables"
 		if env != "" {

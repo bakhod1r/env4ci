@@ -136,6 +136,9 @@ type ExampleKey struct {
 	Stages   []string
 	Branches []string // omitted from the comment when it runs on every branch
 	Sources  []string
+	// Group keeps related keys together: a blank line separates groups,
+	// keys of one group follow each other. Empty = every key on its own.
+	Group string
 }
 
 // WriteExample emits KEY= lines with a comment saying where each key is used.
@@ -163,7 +166,7 @@ func AppendKeys(w io.Writer, keys []ExampleKey) error {
 }
 
 func writeKeyLines(w io.Writer, keys []ExampleKey) error {
-	for _, k := range keys {
+	for i, k := range keys {
 		comment := k.Kind
 		if len(k.Stages) > 0 {
 			comment += " · stages: " + strings.Join(k.Stages, ", ")
@@ -174,7 +177,11 @@ func writeKeyLines(w io.Writer, keys []ExampleKey) error {
 		if len(k.Sources) > 0 {
 			comment += " · " + strings.Join(k.Sources, ", ")
 		}
-		if _, err := fmt.Fprintf(w, "\n# %s\n%s=\n", comment, k.Key); err != nil {
+		sep := "\n"
+		if i > 0 && k.Group != "" && k.Group == keys[i-1].Group {
+			sep = ""
+		}
+		if _, err := fmt.Fprintf(w, "%s# %s\n%s=\n", sep, comment, k.Key); err != nil {
 			return err
 		}
 	}
