@@ -57,8 +57,8 @@ env4ci scan -f .env --write      # find vars CI files use, write .env examples
 | `.env4ci/env4ci.env` (`auth_file:`) | tokens and addresses for the configured targets | env4ci itself; loaded at start, real env vars win, never synced |
 | `.env4ci/<env>.env` (`environments:`) | variables your pipelines read, found by `scan` | `diff` / `push` |
 
-Before writing, the folder gets `/.env4ci/` in the root `.gitignore` and its own `.gitignore` containing `*`
-(files configured at the top level are ignored one by one). Existing values are never touched; keys a file lacks are appended under `# --- added by env4ci gen ---`.
+Before writing, `/.env4ci/` is added to the root `.gitignore` (files configured at the top level are
+ignored one by one). Existing values are never touched; keys a file lacks are appended under `# --- added by env4ci gen ---`.
 Run it again after changing CI files. The auth file accepts only env4ci settings, and `push` refuses to use it as a source.
 
 ## HashiCorp Vault

@@ -83,3 +83,37 @@ func TestScanInvalidYAML(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestHiddenTemplateOnlyKeyKept(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte(`
+.base:
+  script: [echo $ONLY_IN_TEMPLATE $SHARED_TOKEN]
+job:
+  extends: .base
+  script: [echo $SHARED_TOKEN]
+`), 0o644)
+	refs, err := Scan(dir, domain.DefaultClassifier())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, r := range refs {
+		got[r.Key] = len(r.Stages)
+	}
+	if len(refs) != 2 || got["SHARED_TOKEN"] != 1 || got["ONLY_IN_TEMPLATE"] != 0 {
+		t.Fatalf("%s", render(refs))
+	}
+}
+
+func TestKindHints(t *testing.T) {
+	h := KindHints([]domain.Reference{
+		{Key: "A", Kind: domain.KindVariable, Provider: "github"},
+		{Key: "A", Kind: domain.KindSecret, Provider: "github"},
+		{Key: "B", Kind: domain.KindVariable, Provider: "github"},
+		{Key: "C", Kind: domain.KindVariable, Provider: "gitlab"},
+	})
+	if len(h) != 2 || h["A"] != domain.KindSecret || h["B"] != domain.KindVariable {
+		t.Fatalf("%v", h)
+	}
+}

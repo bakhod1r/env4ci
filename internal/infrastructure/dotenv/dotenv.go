@@ -16,7 +16,8 @@ type Entry struct {
 }
 
 // Parse reads KEY=VALUE lines. Supports comments, blank lines, an optional
-// "export " prefix, and single/double quoted values (\n, \", \\ escapes in double quotes).
+// "export " prefix, and single/double quoted values (\n, \", \\ escapes in
+// double quotes). A quoted value may span lines (pasted PEM keys).
 func Parse(r io.Reader) ([]Entry, error) {
 	var out []Entry
 	seen := map[string]int{}
@@ -35,9 +36,19 @@ func Parse(r io.Reader) ([]Entry, error) {
 			return nil, fmt.Errorf("line %d: expected KEY=VALUE", line)
 		}
 		key := strings.TrimSpace(s[:eq])
-		val, err := parseValue(strings.TrimSpace(s[eq+1:]))
+		raw := strings.TrimSpace(s[eq+1:])
+		start := line
+		// An opening quote without its closing quote continues on next lines.
+		for raw != "" && (raw[0] == '"' || raw[0] == '\'') && unterminated(raw) {
+			if !sc.Scan() {
+				return nil, fmt.Errorf("line %d: unterminated quoted value", start)
+			}
+			line++
+			raw += "\n" + strings.TrimRight(sc.Text(), "\r")
+		}
+		val, err := parseValue(raw)
 		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", line, err)
+			return nil, fmt.Errorf("line %d: %w", start, err)
 		}
 		if i, dup := seen[key]; dup {
 			out[i].Value = val // last one wins, like most dotenv loaders
@@ -47,6 +58,22 @@ func Parse(r io.Reader) ([]Entry, error) {
 		out = append(out, Entry{Key: key, Value: val})
 	}
 	return out, sc.Err()
+}
+
+// unterminated reports whether a value opening with a quote lacks its
+// closing quote (escaped \" does not close a double-quoted value).
+func unterminated(v string) bool {
+	q := v[0]
+	for i := 1; i < len(v); i++ {
+		if q == '"' && v[i] == '\\' {
+			i++
+			continue
+		}
+		if v[i] == q {
+			return false
+		}
+	}
+	return true
 }
 
 func parseValue(v string) (string, error) {

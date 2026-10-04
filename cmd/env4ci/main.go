@@ -185,11 +185,12 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	case "scan":
 		return cmdScan(cfg, o, out)
 	case "verify":
-		if o.file == "" && len(cfg.Branches) > 0 {
-			if t, err := resolveTarget(cfg, o, nil, gitSource{dir: "."}); err == nil {
-				o.file = t.File
-			}
+		env, file, from, err := resolveEnvFile(cfg, o, gitSource{dir: "."}, "")
+		if err != nil {
+			return err
 		}
+		o.file = file
+		fmt.Fprintln(out, newPalette(out).Dim(fmt.Sprintf("→ verify %s%s", file, map[bool]string{true: " (environment " + env + ", " + from + ")", false: ""}[from != ""])))
 		local, err := loadLocal(cfg, o)
 		if err != nil {
 			return err
@@ -470,12 +471,17 @@ func loadLocal(cfg config.Config, o opts) ([]domain.Variable, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Workflows that read ${{ vars.X }} decide X's kind when no rule matches.
+	var hints map[string]domain.Kind
+	if refs, err := ciscan.Scan(".", cl); err == nil {
+		hints = ciscan.KindHints(refs)
+	}
 	vars := make([]domain.Variable, 0, len(entries))
 	for _, e := range entries {
 		if err := domain.ValidateKey(e.Key); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		vars = append(vars, domain.Variable{Key: e.Key, Value: e.Value, Kind: cl.Classify(e.Key)})
+		vars = append(vars, domain.Variable{Key: e.Key, Value: e.Value, Kind: cl.ClassifyHinted(e.Key, hints)})
 	}
 	return vars, nil
 }

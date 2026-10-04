@@ -38,11 +38,31 @@ func DefaultClassifier() Classifier {
 }
 
 func (c Classifier) Classify(key string) Kind {
+	if k, ok := c.match(key); ok {
+		return k
+	}
+	return c.fallback
+}
+
+// ClassifyHinted is Classify, except that a key no rule matches takes the
+// kind the CI files declare (GitHub ${{ vars.X }} / ${{ secrets.X }}) before
+// the fallback. Explicit rules always win.
+func (c Classifier) ClassifyHinted(key string, hints map[string]Kind) Kind {
+	if k, ok := c.match(key); ok {
+		return k
+	}
+	if k, ok := hints[key]; ok {
+		return k
+	}
+	return c.fallback
+}
+
+func (c Classifier) match(key string) (Kind, bool) {
 	upper := strings.ToUpper(key)
 	for _, r := range c.rules {
 		if ok, _ := path.Match(strings.ToUpper(r.Pattern), upper); ok {
-			return r.Kind
+			return r.Kind, true
 		}
 	}
-	return c.fallback
+	return 0, false
 }

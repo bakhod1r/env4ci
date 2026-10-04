@@ -47,9 +47,8 @@ func TestGenGolden(t *testing.T) {
 	if strings.Count(string(gi), "/.env4ci/\n") != 1 {
 		t.Errorf("folder not gitignored exactly once:\n%s", gi)
 	}
-	inner, _ := os.ReadFile(filepath.Join(dir, ".env4ci", ".gitignore"))
-	if !strings.HasSuffix(string(inner), "\n*\n") {
-		t.Errorf("inner .gitignore:\n%s", inner)
+	if _, err := os.Stat(filepath.Join(dir, ".env4ci", ".gitignore")); err == nil {
+		t.Error("no .gitignore inside .env4ci/ expected")
 	}
 	if st, err := os.Stat(filepath.Join(dir, ".env4ci")); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o700) {
 		t.Errorf("folder: %v %v", st, err)

@@ -106,13 +106,13 @@ func (c RegistryCredential) Keys() []string { return nonEmpty(c.Username, c.Pass
 
 // keyPrefix strips the first matching suffix; "SSH_PRIVATE_KEY" -> "".
 func keyPrefix(key string, suffixes ...string) string {
+	if key == "SSH_PRIVATE_KEY" || key == "SSH_KEY" || key == "PRIVATE_KEY" {
+		return ""
+	}
 	for _, s := range suffixes {
 		if strings.HasSuffix(key, s) {
 			return strings.TrimSuffix(key, s)
 		}
-	}
-	if key == "SSH_PRIVATE_KEY" || key == "SSH_KEY" || key == "PRIVATE_KEY" {
-		return ""
 	}
 	return key
 }

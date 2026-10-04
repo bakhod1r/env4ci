@@ -252,7 +252,26 @@ func scanGitLabDir(root string, cl domain.Classifier) ([]domain.Reference, error
 			}
 		})
 	}
-	return refs, nil
+	return dropTemplateOnly(refs), nil
+}
+
+// dropTemplateOnly removes hidden-template references (no stage) for keys a
+// real job also uses; a template reached only via `extends:` keeps its key.
+func dropTemplateOnly(refs []domain.Reference) []domain.Reference {
+	inJob := map[string]bool{}
+	for _, r := range refs {
+		if len(r.Stages) > 0 {
+			inJob[r.Key] = true
+		}
+	}
+	out := refs[:0]
+	for _, r := range refs {
+		if len(r.Stages) == 0 && inJob[r.Key] {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // localIncludes returns `include:` entries that point at files in the repo.
@@ -443,4 +462,20 @@ func walkScalars(n *yaml.Node, fn func(string)) {
 			walkScalars(n.Alias, fn)
 		}
 	}
+}
+
+// KindHints returns the kind GitHub workflows declare per key
+// (vars.X -> variable, secrets.X -> secret; secret wins on conflict).
+// GitLab references carry no declared kind and are skipped.
+func KindHints(refs []domain.Reference) map[string]domain.Kind {
+	out := map[string]domain.Kind{}
+	for _, r := range refs {
+		if r.Provider != "github" {
+			continue
+		}
+		if prev, ok := out[r.Key]; !ok || prev == domain.KindVariable {
+			out[r.Key] = r.Kind
+		}
+	}
+	return out
 }

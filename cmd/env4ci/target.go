@@ -130,34 +130,43 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 		return t, fmt.Errorf("%s: repository unknown (use --repo, set it in env4ci.yaml, or run inside a clone with origin on %s)", t.Provider, t.Provider)
 	}
 
-	// Environment: -e, --shared, branch map, config.
-	switch {
-	case o.env != "":
-		t.Environment = o.env
-	case o.shared:
-		t.Environment = ""
-	case len(cfg.Branches) > 0:
-		branch, err := git.Branch()
-		if err != nil {
-			return t, fmt.Errorf("branches: is configured but the current branch is unknown: %w", err)
-		}
-		env, ok := domain.BranchMap(cfg.Branches).Environment(branch)
-		if !ok {
-			return t, fmt.Errorf("branch %q has no environment in branches: (use -e <env>, --shared, or add a mapping)", branch)
-		}
-		t.Environment = env
-		t.from = append(t.from, "branch "+branch)
-	default:
-		t.Environment = cfgEnv
+	env, file, from, err := resolveEnvFile(cfg, o, git, cfgEnv)
+	if err != nil {
+		return t, err
 	}
-
-	// Local file: -f, environments map, source, .env.
-	t.File = first(o.file, cfg.Environments[t.Environment], cfg.Source, ".env")
+	t.Environment, t.File = env, file
+	if from != "" {
+		t.from = append(t.from, from)
+	}
 
 	if t.Provider == "vault" {
 		t.Repo = vaultPath(t.Repo, t.Environment)
 	}
 	return t, nil
+}
+
+// resolveEnvFile picks the environment (-e, --shared, branch map, then
+// fallback) and its local file (-f, environments map, source, .env).
+// It needs no provider, so commands like verify can use it directly.
+func resolveEnvFile(cfg config.Config, o opts, git gitReader, fallback string) (env, file, from string, err error) {
+	switch {
+	case o.env != "":
+		env = o.env
+	case o.shared:
+	case len(cfg.Branches) > 0:
+		branch, err := git.Branch()
+		if err != nil {
+			return "", "", "", fmt.Errorf("branches: is configured but the current branch is unknown: %w", err)
+		}
+		e, ok := domain.BranchMap(cfg.Branches).Environment(branch)
+		if !ok {
+			return "", "", "", fmt.Errorf("branch %q has no environment in branches: (use -e <env>, --shared, or add a mapping)", branch)
+		}
+		env, from = e, "branch "+branch
+	default:
+		env = fallback
+	}
+	return env, first(o.file, cfg.Environments[env], cfg.Source, ".env"), from, nil
 }
 
 // vaultPath fills {env}; repository level becomes "shared". A path without
