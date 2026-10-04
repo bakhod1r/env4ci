@@ -47,6 +47,7 @@ type variable struct {
 	Key              string `json:"key"`
 	Value            string `json:"value"`
 	Masked           bool   `json:"masked"`
+	VariableType     string `json:"variable_type,omitempty"` // env_var | file
 	Protected        bool   `json:"protected"`
 	EnvironmentScope string `json:"environment_scope"`
 }
@@ -63,7 +64,7 @@ func (c *Client) List(ctx context.Context) ([]domain.Remote, error) {
 				continue
 			}
 			kind := domain.KindVariable
-			if v.Masked {
+			if v.Masked || v.VariableType == "file" {
 				kind = domain.KindSecret
 			}
 			out = append(out, domain.Remote{Key: v.Key, Value: v.Value, Kind: kind, Known: true})
@@ -80,13 +81,17 @@ const MinMaskedLength = 8
 // ValidateMasked reports values GitLab refuses to mask, before any API call.
 func ValidateMasked(key, value string) error {
 	switch {
+	case multiLine(value):
+		return nil // stored as a file variable, see Set
 	case len(value) < MinMaskedLength:
 		return fmt.Errorf("gitlab: secret %s must be at least %d characters to be masked; make it longer or classify it as a variable", key, MinMaskedLength)
-	case strings.ContainsAny(value, "\n\r"):
-		return fmt.Errorf("gitlab: secret %s is multi-line and cannot be masked; base64-encode it or classify it as a variable", key)
 	}
 	return nil
 }
+
+// multiLine values (SSH keys, certificates) cannot be masked by GitLab; they
+// are stored as file-type variables instead, which CI jobs read via a path.
+func multiLine(v string) bool { return strings.ContainsAny(v, "\n\r") }
 
 // Validate implements application.Validator.
 func (c *Client) Validate(v domain.Variable) error {
@@ -104,9 +109,13 @@ func (c *Client) Set(ctx context.Context, v domain.Variable) error {
 	}
 	body := variable{
 		Key: v.Key, Value: v.Value,
-		Masked:           v.Kind == domain.KindSecret,
+		Masked:           v.Kind == domain.KindSecret && !multiLine(v.Value),
 		Protected:        c.Protected,
 		EnvironmentScope: c.scope(),
+		VariableType:     "env_var",
+	}
+	if v.Kind == domain.KindSecret && multiLine(v.Value) {
+		body.VariableType = "file"
 	}
 	err := c.do(ctx, http.MethodPut, c.keyPath(v.Key), body, nil)
 	if isNotFound(err) {

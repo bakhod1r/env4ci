@@ -43,7 +43,7 @@ func TestScanFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v (run: go test ./internal/infrastructure/ciscan -update)", err)
 			}
-			if got != string(want) {
+			if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
 				t.Errorf("mismatch for %s\n--- got\n%s--- want\n%s", name, got, want)
 			}
 		})

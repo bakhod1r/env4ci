@@ -76,3 +76,14 @@ func (p Plan) HasWrites() bool {
 	}
 	return false
 }
+
+// WriteKeys lists keys applying the plan would write.
+func (p Plan) WriteKeys() []string {
+	var out []string
+	for _, c := range p.Changes {
+		if c.Action == ActionCreate || c.Action == ActionUpdate || c.Action == ActionUnverifiable {
+			out = append(out, c.Key)
+		}
+	}
+	return out
+}

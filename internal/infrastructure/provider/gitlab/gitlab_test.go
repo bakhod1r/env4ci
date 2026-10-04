@@ -65,7 +65,7 @@ func TestClientFlow(t *testing.T) {
 }
 
 func TestValidateMasked(t *testing.T) {
-	for v, ok := range map[string]bool{"12345678": true, "short": false, "line1\nline2long": false} {
+	for v, ok := range map[string]bool{"12345678": true, "short": false, "line1\nline2long": true} {
 		if err := ValidateMasked("K", v); (err == nil) != ok {
 			t.Errorf("ValidateMasked(%q) = %v", v, err)
 		}
@@ -85,3 +85,32 @@ func TestShortSecretRejectedBeforeHTTP(t *testing.T) {
 type doerFunc func(*http.Request) (*http.Response, error)
 
 func (f doerFunc) Do(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestMultiLineSecretBecomesFileVariable(t *testing.T) {
+	var got variable
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			json.NewDecoder(r.Body).Decode(&got)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, Project: "p", Token: "t"}
+	key := "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----"
+	if err := c.Set(context.Background(), domain.Variable{Key: "SSH_PRIVATE_KEY", Value: key, Kind: domain.KindSecret}); err != nil {
+		t.Fatal(err)
+	}
+	if got.VariableType != "file" || got.Masked {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestFileVariableListedAsSecret(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `[{"key":"K","value":"a\nb","masked":false,"variable_type":"file","environment_scope":"*"}]`)
+	}))
+	defer srv.Close()
+	rs, err := (&Client{BaseURL: srv.URL, Project: "p", Token: "t"}).List(context.Background())
+	if err != nil || len(rs) != 1 || rs[0].Kind != domain.KindSecret {
+		t.Fatalf("rs=%+v err=%v", rs, err)
+	}
+}

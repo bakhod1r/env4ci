@@ -19,6 +19,34 @@ type Config struct {
 	Default string  `yaml:"default"` // kind for unmatched keys
 	Rules   []Rule  `yaml:"rules"`
 	Targets Targets `yaml:"targets"`
+
+	// Branches maps git branches (or globs) to CI environments.
+	Branches map[string]string `yaml:"branches"`
+	// Environments maps an environment to its local .env file.
+	Environments map[string]string `yaml:"environments"`
+	// Checks configures credential verification before push.
+	Checks Checks `yaml:"checks"`
+}
+
+// Checks name the variables that hold each credential. Each field is a
+// variable name from the .env file, not a value.
+type Checks struct {
+	SSH      []SSHCheck      `yaml:"ssh"`
+	Registry []RegistryCheck `yaml:"registry"`
+}
+
+type SSHCheck struct {
+	Key        string `yaml:"key"`
+	Host       string `yaml:"host"`
+	User       string `yaml:"user"`
+	Port       string `yaml:"port"`
+	KnownHosts string `yaml:"known_hosts"`
+}
+
+type RegistryCheck struct {
+	Registry string `yaml:"registry"` // literal host, e.g. ghcr.io
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 type Rule struct {
@@ -99,9 +127,28 @@ rules:
   - { pattern: "APP_*",      type: variable }
   - { pattern: "LOG_*",      type: variable }
 
+# Branch -> environment. "env4ci push" on branch main writes to production.
+# branches:
+#   main: production
+#   develop: staging
+#   "release/*": staging
+# environments:
+#   production: .env.production
+#   staging: .env.staging
+
+# Credentials are verified before push (SSH login, registry login).
+# Common names (SSH_PRIVATE_KEY + SSH_HOST + SSH_USER, GHCR_TOKEN, DOCKERHUB_TOKEN ...)
+# are detected automatically; list others here by variable name.
+# checks:
+#   ssh:
+#     - { key: DEPLOY_KEY, host: DEPLOY_HOST, user: DEPLOY_USER, port: DEPLOY_PORT }
+#   registry:
+#     - { registry: ghcr.io, username: GHCR_USER, password: GHCR_TOKEN }
+
+# repo/project are read from "git remote origin" when omitted.
 targets:
   github:
-    repo: owner/name
+    # repo: owner/name
     # environment: production   # omit for repository-level
   # gitlab:
   #   project: group/project

@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"io"
@@ -13,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestValidateNeverPrintsValues(t *testing.T) {
@@ -127,6 +132,12 @@ func copyDir(t *testing.T, src string) string {
 	return dst
 }
 
+// redactDir hides the temp dir and normalizes the separator after it (Windows).
+func redactDir(s, dir string) string {
+	s = strings.ReplaceAll(s, dir+string(filepath.Separator), "<dir>/")
+	return strings.ReplaceAll(s, dir, "<dir>")
+}
+
 func golden(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", "golden", name)
@@ -138,7 +149,7 @@ func golden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("%v (run: go test ./cmd/env4ci -update)", err)
 	}
-	if got != string(want) {
+	if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Errorf("%s mismatch\n--- got\n%s--- want\n%s", name, got, want)
 	}
 }
@@ -150,7 +161,7 @@ func TestScanGolden(t *testing.T) {
 	if err := run(context.Background(), args, nil, &out); err != nil {
 		t.Fatal(err)
 	}
-	golden(t, "scan.stdout", strings.ReplaceAll(out.String(), dir, "<dir>"))
+	golden(t, "scan.stdout", redactDir(out.String(), dir))
 	for _, f := range []string{".env.example", ".env.production.example", ".env.staging.example"} {
 		b, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {
@@ -176,7 +187,7 @@ func TestScanByBranchGolden(t *testing.T) {
 	if err := run(context.Background(), args, nil, &out); err != nil {
 		t.Fatal(err)
 	}
-	golden(t, "branch/scan.stdout", strings.ReplaceAll(out.String(), dir, "<dir>"))
+	golden(t, "branch/scan.stdout", redactDir(out.String(), dir))
 	for _, f := range []string{".env.example", ".env.main.example", ".env.develop.example", ".env.tags.example", ".env.default.example", ".env.release.example"} {
 		b, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {
@@ -265,5 +276,56 @@ func TestPushRejectsShortGitLabSecretBeforeWriting(t *testing.T) {
 	err := run(context.Background(), []string{"push", "gitlab", "-c", cfg, "-f", env, "-y"}, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "at least 8") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPushBlockedByFailedCredentialCheck(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	block, _ := ssh.MarshalPrivateKey(priv, "")
+	key := strings.ReplaceAll(string(pem.EncodeToMemory(block)), "\n", `\n`)
+
+	var writes int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			io.WriteString(w, `[]`)
+			return
+		}
+		writes++
+		w.WriteHeader(201)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "env4ci.yaml")
+	os.WriteFile(cfg, []byte("targets:\n  gitlab:\n    project: g/p\n    base_url: "+srv.URL+"\n"), 0o600)
+	env := filepath.Join(dir, ".env")
+	// Port 1 refuses connections: the login cannot succeed.
+	os.WriteFile(env, []byte("SSH_PRIVATE_KEY=\""+key+"\"\nSSH_HOST=127.0.0.1:1\nSSH_USER=deployer\nSSH_KNOWN_HOSTS=\"# no hosts here\"\n"), 0o600)
+	t.Setenv("GITLAB_TOKEN", "tok")
+
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"push", "gitlab", "-c", cfg, "-f", env, "-y"}, nil, &out)
+	if !errors.Is(err, errCheckFailed) || writes != 0 {
+		t.Fatalf("err=%v writes=%d\n%s", err, writes, out.String())
+	}
+	if !strings.Contains(out.String(), "✗ ssh deployer@127.0.0.1:1 (SSH_PRIVATE_KEY)") || strings.Contains(out.String(), "PRIVATE KEY-----") {
+		t.Fatalf("output:\n%s", out.String())
+	}
+
+	// --no-verify skips the check and writes.
+	if err := run(context.Background(), []string{"push", "gitlab", "-c", cfg, "-f", env, "-y", "--no-verify"}, nil, io.Discard); err != nil || writes == 0 {
+		t.Fatalf("no-verify: err=%v writes=%d", err, writes)
+	}
+}
+
+func TestVerifyCommandNoCredentials(t *testing.T) {
+	dir := t.TempDir()
+	env := filepath.Join(dir, ".env")
+	os.WriteFile(env, []byte("APP_PORT=1\n"), 0o600)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"verify", "-f", env, "-c", filepath.Join(dir, "x.yaml")}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "No SSH keys") {
+		t.Fatalf("%s", out.String())
 	}
 }

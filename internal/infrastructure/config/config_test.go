@@ -15,7 +15,7 @@ func TestLoadTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Targets.GitHub.Repo != "owner/name" || c.Source != ".env" {
+	if c.Source != ".env" || c.Default != "secret" {
 		t.Fatalf("%+v", c)
 	}
 	cl, err := c.Classifier()
@@ -45,5 +45,24 @@ func TestBadRuleType(t *testing.T) {
 	c := Config{Rules: []Rule{{Pattern: "*", Type: "nope"}}}
 	if _, err := c.Classifier(); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestLoadBranchesEnvironmentsChecks(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	os.WriteFile(p, []byte(`
+branches: { main: production, "release/*": staging }
+environments: { production: .env.prod }
+checks:
+  ssh: [{ key: K, host: H, user: U }]
+  registry: [{ registry: ghcr.io, username: GU, password: GP }]
+`), 0o600)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Branches["release/*"] != "staging" || c.Environments["production"] != ".env.prod" ||
+		c.Checks.SSH[0].Host != "H" || c.Checks.Registry[0].Registry != "ghcr.io" {
+		t.Fatalf("%+v", c)
 	}
 }

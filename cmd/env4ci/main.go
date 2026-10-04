@@ -23,8 +23,7 @@ import (
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/dotenv"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/httpx"
-	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/github"
-	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/gitlab"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/verify"
 )
 
 var version = "dev"
@@ -34,9 +33,13 @@ const usage = `env4ci — sync environment variables and secrets across CI/CD pl
 Usage:
   env4ci init                       write env4ci.yaml template
   env4ci validate                   parse and classify the local file
-  env4ci diff  <github|gitlab>      show plan (never prints values)
-  env4ci push  <github|gitlab>      apply plan after confirmation
-  env4ci pull  <github|gitlab>      write readable remote values to a .env file
+  env4ci diff  [github|gitlab]      show plan (never prints values)
+  env4ci push  [github|gitlab]      apply plan after confirmation
+  env4ci pull  [github|gitlab]      write readable remote values to a .env file
+
+  Provider, repository and environment default to: git remote origin, and the
+  current branch mapped through "branches:" in env4ci.yaml.
+  env4ci verify                     log in with SSH keys / registry tokens from the .env file
   env4ci scan                       list variables CI files expect; --write creates .env examples
   env4ci version
 
@@ -44,6 +47,8 @@ Flags (after the subcommand):
   -c, --config   config file (default env4ci.yaml)
   -f, --file     local .env file (overrides config source)
   -e, --env      GitHub environment / GitLab environment scope
+  --no-verify    push: skip SSH/registry login checks
+  --shared       target repository level / scope "*" (ignore branches:)
   --repo         GitHub owner/name or GitLab project path
   --prune        push: delete remote keys missing locally
   -y, --yes      push: skip confirmation
@@ -81,6 +86,7 @@ type opts struct {
 	config, file, env, repo, out string
 	dir, by                      string
 	prune, yes, write, exitCode  bool
+	shared, noVerify             bool
 }
 
 func parseFlags(args []string) (opts, []string, error) {
@@ -108,6 +114,8 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.StringVar(&o.dir, "dir", ".", "")
 	fs.StringVar(&o.by, "by", "env", "")
 	fs.BoolVar(&o.exitCode, "exit-code", false, "")
+	fs.BoolVar(&o.shared, "shared", false, "")
+	fs.BoolVar(&o.noVerify, "no-verify", false, "")
 
 	// Allow flags before and after positional args.
 	var pos []string
@@ -156,14 +164,39 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		return nil
 	case "scan":
 		return cmdScan(cfg, o, out)
+	case "verify":
+		if o.file == "" && len(cfg.Branches) > 0 {
+			if t, err := resolveTarget(cfg, o, nil, gitSource{dir: "."}); err == nil {
+				o.file = t.File
+			}
+		}
+		local, err := loadLocal(cfg, o)
+		if err != nil {
+			return err
+		}
+		checks := credentialChecks(cfg, local)
+		if len(checks) == 0 {
+			fmt.Fprintln(out, "No SSH keys or registry credentials found.")
+			return nil
+		}
+		if err := runCredentialChecks(ctx, out, checks, nil); err != nil {
+			return errors.New("credential check failed")
+		}
+		return nil
 	case "diff", "plan", "push", "apply", "pull":
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 	}
-	if len(pos) != 1 {
-		return fmt.Errorf("%s: provider required (github or gitlab)", cmd)
+	if len(pos) > 1 {
+		return fmt.Errorf("%s: at most one provider argument (github or gitlab)", cmd)
 	}
-	p, err := newProvider(pos[0], cfg, o)
+	t, err := resolveTarget(cfg, o, pos, gitSource{dir: "."})
+	if err != nil {
+		return err
+	}
+	o.env, o.file = t.Environment, t.File
+	fmt.Fprintln(out, newPalette(out).Dim(t.Describe()))
+	p, err := newProvider(t)
 	if err != nil {
 		return err
 	}
@@ -195,11 +228,16 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		fmt.Fprintln(out, "\nNothing to do.")
 		return nil
 	}
+	if !o.noVerify {
+		if err := runCredentialChecks(ctx, out, credentialChecks(cfg, local), application.TouchedKeys(plan)); err != nil {
+			return err
+		}
+	}
 	if !o.yes && !confirm(in, out, "\nApply these changes? [y/N] ") {
 		return errors.New("aborted")
 	}
 	res, err := svc.Apply(ctx, local, plan, remote, application.ApplyOptions{Prune: o.prune})
-	fmt.Fprintf(out, "\n✓ %d written, %d deleted\n", res.Written, res.Deleted)
+	fmt.Fprintf(out, "\n%s %d written, %d deleted\n", newPalette(out).Green("✓"), res.Written, res.Deleted)
 	return err
 }
 
@@ -378,43 +416,6 @@ func loadLocal(cfg config.Config, o opts) ([]domain.Variable, error) {
 	return vars, nil
 }
 
-func newProvider(name string, cfg config.Config, o opts) (application.Provider, error) {
-	switch name {
-	case "github":
-		t := cfg.Targets.GitHub
-		if t == nil {
-			t = &config.GitHub{}
-		}
-		c := &github.Client{BaseURL: t.BaseURL, Repo: first(o.repo, t.Repo), Environment: first(o.env, t.Environment)}
-		c.Token = first(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN"))
-		if c.Token == "" {
-			c.Token = ghCLIToken()
-		}
-		if c.Repo == "" {
-			return nil, errors.New("github: repo not set (--repo or targets.github.repo)")
-		}
-		if c.Token == "" {
-			return nil, errors.New("github: no token (set GITHUB_TOKEN or run \"gh auth login\")")
-		}
-		return c, nil
-	case "gitlab":
-		t := cfg.Targets.GitLab
-		if t == nil {
-			t = &config.GitLab{}
-		}
-		c := &gitlab.Client{BaseURL: first(t.BaseURL, os.Getenv("GITLAB_URL"), os.Getenv("CI_SERVER_URL")), Project: first(o.repo, t.Project), Environment: first(o.env, t.Environment), Protected: t.Protected}
-		c.Token = os.Getenv("GITLAB_TOKEN")
-		if c.Project == "" {
-			return nil, errors.New("gitlab: project not set (--repo or targets.gitlab.project)")
-		}
-		if c.Token == "" {
-			return nil, errors.New("gitlab: GITLAB_TOKEN not set")
-		}
-		return c, nil
-	}
-	return nil, fmt.Errorf("unknown provider %q (want github or gitlab)", name)
-}
-
 func cmdPull(ctx context.Context, svc application.Service, o opts, out io.Writer) error {
 	known, hidden, err := svc.Pull(ctx)
 	if err != nil {
@@ -489,15 +490,99 @@ func printLocal(out io.Writer, vars []domain.Variable) {
 }
 
 func printPlan(out io.Writer, target string, p domain.Plan, prune bool) {
-	fmt.Fprintf(out, "%s\n\n", target)
+	ui := newPalette(out)
+	fmt.Fprintf(out, "%s\n\n", ui.Bold(target))
 	for _, c := range p.Changes {
 		label := c.Action.String()
 		if c.Action == domain.ActionRemoteOnly && prune {
 			label = "delete"
 		}
-		fmt.Fprintf(out, "  %s %-32s %-8s %s\n", c.Action.Symbol(), c.Key, c.Kind, label)
+		line := fmt.Sprintf("  %s %-32s %-8s %s", c.Action.Symbol(), c.Key, c.Kind, label)
+		switch c.Action {
+		case domain.ActionCreate:
+			line = ui.Green(line)
+		case domain.ActionUpdate:
+			line = ui.Yellow(line)
+		case domain.ActionUnverifiable:
+			line = ui.Purple(line)
+		case domain.ActionRemoteOnly:
+			if prune {
+				line = ui.Red(line)
+			} else {
+				line = ui.Dim(line)
+			}
+		default:
+			line = ui.Dim(line)
+		}
+		fmt.Fprintln(out, line)
 	}
 }
+
+// credentialChecks merges auto-detected credentials with env4ci.yaml checks:.
+// A configured entry replaces a detected one for the same key/password.
+func credentialChecks(cfg config.Config, vars []domain.Variable) []application.Check {
+	sshByKey := map[string]domain.SSHCredential{}
+	var sshOrder []string
+	add := func(c domain.SSHCredential) {
+		if _, ok := sshByKey[c.Key]; !ok {
+			sshOrder = append(sshOrder, c.Key)
+		}
+		sshByKey[c.Key] = c
+	}
+	for _, c := range domain.DetectSSH(vars) {
+		add(c)
+	}
+	for _, c := range cfg.Checks.SSH {
+		add(domain.SSHCredential{Key: c.Key, Host: c.Host, User: c.User, Port: c.Port, KnownHosts: c.KnownHosts})
+	}
+	var sshCreds []domain.SSHCredential
+	for _, k := range sshOrder {
+		sshCreds = append(sshCreds, sshByKey[k])
+	}
+
+	regByPw := map[string]domain.RegistryCredential{}
+	var regOrder []string
+	addReg := func(c domain.RegistryCredential) {
+		if _, ok := regByPw[c.Password]; !ok {
+			regOrder = append(regOrder, c.Password)
+		}
+		regByPw[c.Password] = c
+	}
+	for _, c := range domain.DetectRegistry(vars) {
+		addReg(c)
+	}
+	for _, c := range cfg.Checks.Registry {
+		addReg(domain.RegistryCredential{Registry: c.Registry, Username: c.Username, Password: c.Password})
+	}
+	var regCreds []domain.RegistryCredential
+	for _, k := range regOrder {
+		regCreds = append(regCreds, regByPw[k])
+	}
+	return verify.Checks(vars, sshCreds, regCreds)
+}
+
+// runCredentialChecks prints results and returns an error if any failed.
+func runCredentialChecks(ctx context.Context, out io.Writer, checks []application.Check, touched map[string]bool) error {
+	results := application.RunChecks(ctx, checks, touched)
+	if len(results) == 0 {
+		return nil
+	}
+	ui := newPalette(out)
+	fmt.Fprintf(out, "\n%s\n", ui.Bold("Credential checks"))
+	for _, r := range results {
+		if r.Err != nil {
+			fmt.Fprintf(out, "  %s %s: %v\n", ui.Red("✗"), r.Name, r.Err)
+		} else {
+			fmt.Fprintf(out, "  %s %s\n", ui.Green("✓"), r.Name)
+		}
+	}
+	if application.AnyFailed(results) {
+		return errCheckFailed
+	}
+	return nil
+}
+
+var errCheckFailed = errors.New("credential check failed; nothing was written (fix it, or --no-verify to skip)")
 
 func hasRemoteOnly(p domain.Plan) bool {
 	for _, c := range p.Changes {
