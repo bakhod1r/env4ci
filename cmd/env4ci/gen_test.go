@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,7 +14,8 @@ import (
 )
 
 const genCfg = `
-environments: { production: .env.production, staging: .env.staging }
+auth_file: .env4ci/env4ci.env
+environments: { production: .env4ci/production.env, staging: .env4ci/staging.env }
 targets:
   github: { repo: acme/api }
   vault: { address: "https://vault.acme.io", path: "api/{env}" }
@@ -34,18 +36,23 @@ func TestGenGolden(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	golden(t, "gen/stdout", redactDir(out.String(), dir))
-	for _, f := range []string{".env.env4ci", ".env.production", ".env.staging"} {
-		b, err := os.ReadFile(filepath.Join(dir, f))
+	for _, f := range []string{"env4ci.env", "production.env", "staging.env"} {
+		b, err := os.ReadFile(filepath.Join(dir, ".env4ci", f))
 		if err != nil {
 			t.Fatal(err)
 		}
-		golden(t, "gen/"+strings.TrimPrefix(f, "."), string(b))
+		golden(t, "gen/"+f, string(b))
 	}
 	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	for _, f := range []string{".env.env4ci", ".env.production", ".env.staging"} {
-		if !strings.Contains(string(gi), f+"\n") {
-			t.Errorf("%s not gitignored:\n%s", f, gi)
-		}
+	if strings.Count(string(gi), "/.env4ci/\n") != 1 {
+		t.Errorf("folder not gitignored exactly once:\n%s", gi)
+	}
+	inner, _ := os.ReadFile(filepath.Join(dir, ".env4ci", ".gitignore"))
+	if !strings.HasSuffix(string(inner), "\n*\n") {
+		t.Errorf("inner .gitignore:\n%s", inner)
+	}
+	if st, err := os.Stat(filepath.Join(dir, ".env4ci")); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o700) {
+		t.Errorf("folder: %v %v", st, err)
 	}
 
 	// Second run changes nothing.
@@ -60,7 +67,8 @@ func TestGenGolden(t *testing.T) {
 
 func TestGenKeepsValuesAndAppendsMissing(t *testing.T) {
 	dir, cfgPath := genProject(t)
-	prod := filepath.Join(dir, ".env.production")
+	prod := filepath.Join(dir, ".env4ci", "production.env")
+	os.MkdirAll(filepath.Dir(prod), 0o700)
 	os.WriteFile(prod, []byte("DATABASE_URL=postgres://keep\nCUSTOM=1"), 0o600) // no trailing newline
 	var out bytes.Buffer
 	if err := run(context.Background(), []string{"gen", "-c", cfgPath, "--dir", dir}, nil, &out); err != nil {
@@ -122,5 +130,23 @@ func TestPushRefusesAuthFile(t *testing.T) {
 	err := run(context.Background(), []string{"push", "-c", cfgPath, "-f", auth}, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "refusing to sync") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestProtect(t *testing.T) {
+	base := t.TempDir()
+	var out bytes.Buffer
+	ui := palette{}
+	for _, f := range []string{"top.env", "secrets/a/b.env", "secrets/c.env", "../outside.env"} {
+		if err := protect(base, f, &out, ui); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+	}
+	gi, _ := os.ReadFile(filepath.Join(base, ".gitignore"))
+	if string(gi) != "top.env\n/secrets/\n" {
+		t.Fatalf(".gitignore = %q", gi)
+	}
+	if _, err := os.Stat(filepath.Join(base, "secrets", "a")); err != nil {
+		t.Fatal("nested folder not created")
 	}
 }

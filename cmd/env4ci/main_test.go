@@ -136,6 +136,7 @@ func copyDir(t *testing.T, src string) string {
 
 // redactDir hides the temp dir and normalizes the separator after it (Windows).
 func redactDir(s, dir string) string {
+	s = strings.ReplaceAll(s, filepath.ToSlash(dir)+"/", "<dir>/")
 	s = strings.ReplaceAll(s, dir+string(filepath.Separator), "<dir>/")
 	return strings.ReplaceAll(s, dir, "<dir>")
 }

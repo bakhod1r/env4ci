@@ -35,10 +35,13 @@ func branchFor(env string) string {
 	return env
 }
 
-func envFileFor(env string) string { return ".env." + env }
+// SecretsDir holds every generated file; it is gitignored as a whole.
+const SecretsDir = ".env4ci"
+
+func envFileFor(env string) string { return SecretsDir + "/" + env + ".env" }
 
 var initTmpl = template.Must(template.New("init").Funcs(template.FuncMap{
-	"branch": branchFor, "file": envFileFor, "q": func(s string) string { return fmt.Sprintf("%q", s) },
+	"branch": branchFor, "file": envFileFor, "authFile": func() string { return SecretsDir + "/env4ci.env" }, "q": func(s string) string { return fmt.Sprintf("%q", s) },
 	"has": func(xs []string, x string) bool {
 		for _, v := range xs {
 			if v == x {
@@ -66,7 +69,10 @@ branches:
   {{branch . | q}}: {{.}}
 {{- end}}
 
-# Environment -> local file.
+# env4ci's own tokens/addresses (generated, gitignored with the folder).
+auth_file: {{authFile}}
+
+# Environment -> local file. Everything in .env4ci/ is gitignored.
 environments:
 {{- range .Environments}}
   {{.}}: {{file .}}

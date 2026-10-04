@@ -22,11 +22,11 @@ gh attestation verify env4ci_*_linux_amd64.tar.gz --repo bakhod1r/env4ci
 ```bash
 env4ci init                                  # asks: targets, environments, repo, Vault path
 env4ci init --targets github,vault --envs production,staging   # same, no prompts
-# init writes env4ci.yaml, then runs "env4ci gen":
-#   .env.env4ci       env4ci's own settings: GITHUB_TOKEN / GITLAB_TOKEN / VAULT_ADDR / VAULT_TOKEN
-#   .env.production   CI/CD variables, keys pre-filled from your workflow / .gitlab-ci.yml files
-#   .env.staging      ...
-# fill them in (all are 0600 and gitignored)
+# init writes env4ci.yaml (commit it), then runs "env4ci gen":
+#   .env4ci/env4ci.env       env4ci's own settings: GITHUB_TOKEN / GITLAB_TOKEN / VAULT_ADDR / VAULT_TOKEN
+#   .env4ci/production.env   CI/CD variables, keys pre-filled from your workflow / .gitlab-ci.yml files
+#   .env4ci/staging.env      ...
+# .env4ci/ is created 0700 and added to .gitignore before any file is written
 env4ci diff                                  # current branch -> environment (main -> production)
 env4ci push                                  # verifies SSH/registry credentials, asks, writes
 env4ci push --all                            # every environment
@@ -54,10 +54,11 @@ env4ci scan -f .env --write      # find vars CI files use, write .env examples
 
 | File | Holds | Used by |
 |------|-------|---------|
-| `.env.env4ci` (`auth_file:`) | tokens and addresses for the configured targets | env4ci itself; loaded at start, real env vars win, never synced |
-| `.env.<env>` (`environments:`) | variables your pipelines read, found by `scan` | `diff` / `push` |
+| `.env4ci/env4ci.env` (`auth_file:`) | tokens and addresses for the configured targets | env4ci itself; loaded at start, real env vars win, never synced |
+| `.env4ci/<env>.env` (`environments:`) | variables your pipelines read, found by `scan` | `diff` / `push` |
 
-Existing values are never touched; keys a file lacks are appended under `# --- added by env4ci gen ---`.
+Before writing, the folder gets `/.env4ci/` in the root `.gitignore` and its own `.gitignore` containing `*`
+(files configured at the top level are ignored one by one). Existing values are never touched; keys a file lacks are appended under `# --- added by env4ci gen ---`.
 Run it again after changing CI files. The auth file accepts only env4ci settings, and `push` refuses to use it as a source.
 
 ## HashiCorp Vault

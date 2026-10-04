@@ -15,9 +15,12 @@ rules:
 branches:
   "main": production
 
-# Environment -> local file.
+# env4ci's own tokens/addresses (generated, gitignored with the folder).
+auth_file: .env4ci/env4ci.env
+
+# Environment -> local file. Everything in .env4ci/ is gitignored.
 environments:
-  production: .env.production
+  production: .env4ci/production.env
 
 targets:
   github:
