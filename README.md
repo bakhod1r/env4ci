@@ -2,7 +2,7 @@
 
 > Environment configuration for CI/CD.
 
-Sync environment variables and secrets between local `.env` files, **GitHub Actions** and **GitLab CI/CD**.
+Sync environment variables and secrets between local `.env` files, **GitHub Actions**, **GitLab CI/CD** and **HashiCorp Vault**.
 
 [![ci](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml/badge.svg)](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml)
 
@@ -17,6 +17,21 @@ Each release has `checksums.txt` and a GitHub build provenance attestation:
 gh attestation verify env4ci_*_linux_amd64.tar.gz --repo bakhod1r/env4ci
 ```
 
+## Quick start
+
+```bash
+env4ci init                                  # asks: targets, environments, repo, Vault path
+env4ci init --targets github,vault --envs production,staging   # same, no prompts
+# fill .env.production / .env.staging
+env4ci diff                                  # current branch -> environment (main -> production)
+env4ci push                                  # verifies SSH/registry credentials, asks, writes
+env4ci push --all                            # every environment
+```
+
+Inside a clone, the repository and provider come from `git remote origin`; the environment from the
+current branch through `branches:` (in CI: `GITHUB_REF_NAME`, `CI_COMMIT_BRANCH` ...). A branch with no
+mapping is an error, so nothing is ever pushed to the wrong place by accident.
+
 ## Usage
 
 ```bash
@@ -28,6 +43,37 @@ env4ci push gitlab --prune       # also delete remote-only keys
 env4ci pull gitlab -o .env.prod  # remote -> local (0600, auto .gitignore)
 env4ci scan -f .env --write      # find vars CI files use, write .env examples
 ```
+
+## HashiCorp Vault
+
+```yaml
+targets:
+  vault:
+    address: https://vault.example.com:8200   # or VAULT_ADDR
+    mount: secret                             # KV v2 mount
+    path: myapp/{env}                         # {env} -> production, staging; repository level -> shared
+```
+
+Token: `VAULT_TOKEN`, else `~/.vault-token` (`vault login`). `VAULT_NAMESPACE` for Enterprise/HCP.
+Every key of an environment lives in one secret; a push is one check-and-set write (one new version),
+and fails if someone else changed the secret meanwhile. Vault has no secret/variable split, so
+classification is ignored there. `pull` reads every value back.
+
+## Credential checks
+
+Before `push` writes, credentials it is about to store are tried for real:
+
+- **SSH keys** (`SSH_PRIVATE_KEY` + `SSH_HOST` + `SSH_USER` [+ `SSH_PORT`, `SSH_KNOWN_HOSTS`, `*_PASSPHRASE`],
+  or `DEPLOY_SSH_KEY` + `DEPLOY_HOST` ...): SSH handshake and public-key login, then disconnect; no command runs.
+  The host key must be in `SSH_KNOWN_HOSTS` or `~/.ssh/known_hosts` — a key is never offered to an unverified server.
+  A key without host/user is only parsed.
+- **Container registries**: `GHCR_TOKEN` (+ `GHCR_USER`) → ghcr.io, `DOCKERHUB_TOKEN` → Docker Hub,
+  `REGISTRY_PASSWORD` + `REGISTRY_USER` + `REGISTRY` → any v2 registry.
+
+Any failure stops the push before anything is written. `env4ci verify` runs the checks alone;
+`--no-verify` skips them. Other names go under `checks:` in env4ci.yaml.
+
+On GitLab, multi-line secrets (SSH keys, certificates) are stored as **file** variables because GitLab cannot mask them.
 
 ## Scan CI files
 

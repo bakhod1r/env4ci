@@ -25,6 +25,17 @@ type Validator interface {
 	Validate(v domain.Variable) error
 }
 
+// KindAgnostic providers (Vault) store every value the same way; local
+// secret/variable classification is ignored when comparing and writing.
+type KindAgnostic interface {
+	KindAgnostic()
+}
+
+// Batcher providers write a whole plan in one call (one Vault version per push).
+type Batcher interface {
+	ApplyBatch(ctx context.Context, set []domain.Variable, del []string) error
+}
+
 // Service runs plan/apply/pull against one provider target.
 type Service struct {
 	Provider Provider
@@ -32,6 +43,7 @@ type Service struct {
 
 // Plan compares local variables with the provider.
 func (s Service) Plan(ctx context.Context, local []domain.Variable) (domain.Plan, error) {
+	local = s.normalize(local)
 	for _, v := range local {
 		if err := domain.ValidateKey(v.Key); err != nil {
 			return domain.Plan{}, err
@@ -68,6 +80,10 @@ type Result struct {
 // Apply executes a plan. A key that changed kind is deleted from its old
 // store after the new one is written, so it never exists in both.
 func (s Service) Apply(ctx context.Context, local []domain.Variable, plan domain.Plan, remote []domain.Remote, opt ApplyOptions) (Result, error) {
+	local = s.normalize(local)
+	if b, ok := s.Provider.(Batcher); ok {
+		return applyBatch(ctx, b, local, plan, opt)
+	}
 	byKey := make(map[string]domain.Variable, len(local))
 	for _, v := range local {
 		byKey[v.Key] = v
@@ -119,4 +135,42 @@ func (s Service) Pull(ctx context.Context) (known []domain.Remote, hidden []stri
 		}
 	}
 	return known, hidden, nil
+}
+
+func (s Service) normalize(local []domain.Variable) []domain.Variable {
+	if _, ok := s.Provider.(KindAgnostic); !ok {
+		return local
+	}
+	out := make([]domain.Variable, len(local))
+	for i, v := range local {
+		v.Kind = domain.KindSecret
+		out[i] = v
+	}
+	return out
+}
+
+func applyBatch(ctx context.Context, b Batcher, local []domain.Variable, plan domain.Plan, opt ApplyOptions) (Result, error) {
+	byKey := make(map[string]domain.Variable, len(local))
+	for _, v := range local {
+		byKey[v.Key] = v
+	}
+	var set []domain.Variable
+	var del []string
+	for _, c := range plan.Changes {
+		switch c.Action {
+		case domain.ActionCreate, domain.ActionUpdate, domain.ActionUnverifiable:
+			set = append(set, byKey[c.Key])
+		case domain.ActionRemoteOnly:
+			if opt.Prune {
+				del = append(del, c.Key)
+			}
+		}
+	}
+	if len(set) == 0 && len(del) == 0 {
+		return Result{}, nil
+	}
+	if err := b.ApplyBatch(ctx, set, del); err != nil {
+		return Result{}, err
+	}
+	return Result{Written: len(set), Deleted: len(del)}, nil
 }

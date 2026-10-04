@@ -98,3 +98,40 @@ func TestPlanRunsProviderValidationForAllKeys(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+type batchProvider struct {
+	fakeProvider
+	set []domain.Variable
+	del []string
+}
+
+func (*batchProvider) KindAgnostic() {}
+func (b *batchProvider) ApplyBatch(_ context.Context, set []domain.Variable, del []string) error {
+	b.set, b.del = set, del
+	return nil
+}
+
+func TestBatchAndKindAgnostic(t *testing.T) {
+	b := &batchProvider{fakeProvider: fakeProvider{store: map[string]domain.Remote{
+		"SAME": {Key: "SAME", Value: "1", Kind: domain.KindSecret, Known: true},
+		"OLD":  {Key: "OLD", Value: "x", Kind: domain.KindSecret, Known: true},
+	}}}
+	s := Service{Provider: b}
+	ctx := context.Background()
+	local := []domain.Variable{
+		{Key: "SAME", Value: "1", Kind: domain.KindVariable}, // kind ignored: no change
+		{Key: "NEW", Value: "n", Kind: domain.KindVariable},
+	}
+	remote, _ := b.List(ctx)
+	plan, err := s.Plan(ctx, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Apply(ctx, local, plan, remote, ApplyOptions{Prune: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Written != 1 || res.Deleted != 1 || len(b.set) != 1 || b.set[0].Key != "NEW" || b.del[0] != "OLD" || len(b.ops) != 0 {
+		t.Fatalf("res=%+v set=%+v del=%v ops=%v", res, b.set, b.del, b.ops)
+	}
+}

@@ -57,6 +57,31 @@ type Rule struct {
 type Targets struct {
 	GitHub *GitHub `yaml:"github"`
 	GitLab *GitLab `yaml:"gitlab"`
+	Vault  *Vault  `yaml:"vault"`
+}
+
+// Names lists configured targets in a fixed order.
+func (t Targets) Names() []string {
+	var out []string
+	if t.GitHub != nil {
+		out = append(out, "github")
+	}
+	if t.GitLab != nil {
+		out = append(out, "gitlab")
+	}
+	if t.Vault != nil {
+		out = append(out, "vault")
+	}
+	return out
+}
+
+// Vault is a HashiCorp Vault KV v2 target. Path may contain {env}, replaced
+// by the environment name ("shared" for repository level).
+type Vault struct {
+	Address   string `yaml:"address"` // else VAULT_ADDR
+	Namespace string `yaml:"namespace"`
+	Mount     string `yaml:"mount"` // default "secret"
+	Path      string `yaml:"path"`  // e.g. myapp/{env}
 }
 
 type GitHub struct {

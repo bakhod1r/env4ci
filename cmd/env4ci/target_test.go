@@ -100,11 +100,46 @@ func TestResolveTarget(t *testing.T) {
 			name: "bad provider", pos: []string{"bitbucket"}, git: noGit,
 			wantErr: "unknown provider",
 		},
+		{
+			name: "only configured target is the default, even inside a github clone",
+			cfg: config.Config{
+				Targets:      config.Targets{Vault: &config.Vault{Address: "https://v:8200", Path: "app/{env}"}},
+				Branches:     mapCfg.Branches,
+				Environments: mapCfg.Environments,
+			},
+			git: fakeGit{remote: ghRemote, branch: "main"},
+			want: target{Provider: "vault", Repo: "app/production", Environment: "production", File: ".env.production",
+				Vault: &config.Vault{Address: "https://v:8200", Path: "app/{env}"}},
+		},
+		{
+			name: "vault shared + path without {env}",
+			cfg:  config.Config{Targets: config.Targets{Vault: &config.Vault{Address: "https://v", Path: "app"}}},
+			o:    opts{shared: true}, git: noGit,
+			want: target{Provider: "vault", Repo: "app", File: ".env", Vault: &config.Vault{Address: "https://v", Path: "app"}},
+		},
+		{
+			name: "vault path without {env} gets env appended",
+			cfg:  config.Config{Targets: config.Targets{Vault: &config.Vault{Address: "https://v", Path: "app/"}}},
+			o:    opts{env: "staging"}, git: noGit,
+			want: target{Provider: "vault", Repo: "app/staging", Environment: "staging", File: ".env", Vault: &config.Vault{Address: "https://v", Path: "app/"}},
+		},
+		{
+			name: "vault without address",
+			cfg:  config.Config{Targets: config.Targets{Vault: &config.Vault{Path: "app"}}},
+			git:  noGit, wantErr: "address unknown",
+		},
+		{
+			name: "several targets need an argument",
+			cfg:  config.Config{Targets: config.Targets{GitHub: &config.GitHub{Repo: "a/b"}, Vault: &config.Vault{Address: "x", Path: "p"}}},
+			git:  noGit, wantErr: "several targets configured (github, vault)",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("GITLAB_URL", "")
 			t.Setenv("CI_SERVER_URL", "")
+			t.Setenv("VAULT_ADDR", "")
+			t.Setenv("VAULT_NAMESPACE", "")
 			got, err := resolveTarget(tc.cfg, tc.o, tc.pos, tc.git)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {

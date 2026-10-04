@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/bakhod1r/env4ci/internal/application"
@@ -12,6 +13,7 @@ import (
 	"github.com/bakhod1r/env4ci/internal/infrastructure/gitinfo"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/github"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/gitlab"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/vault"
 )
 
 // gitReader is what target resolution needs from git; faked in tests.
@@ -27,12 +29,13 @@ func (g gitSource) Branch() (string, error)         { return gitinfo.CurrentBran
 
 // target is the fully resolved destination of a diff/push/pull.
 type target struct {
-	Provider    string // github | gitlab
+	Provider    string // github | gitlab | vault
 	Repo        string
 	BaseURL     string
 	Environment string // "" = repository level / scope "*"
 	File        string
 	Protected   bool
+	Vault       *config.Vault // vault only; Repo holds the resolved path
 
 	from []string // where each value came from, for Describe
 }
@@ -40,8 +43,11 @@ type target struct {
 // Describe prints one context line so the user sees what will be touched.
 func (t target) Describe() string {
 	env := "repository level"
-	if t.Provider == "gitlab" {
+	switch t.Provider {
+	case "gitlab":
 		env = `scope "*"`
+	case "vault":
+		env = "shared"
 	}
 	if t.Environment != "" {
 		env = "environment " + t.Environment
@@ -59,18 +65,23 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 	var t target
 	remote, remoteErr := git.Remote()
 
-	// Provider.
+	// Provider: argument, the only configured target, or git remote.
+	configured := cfg.Targets.Names()
 	switch {
 	case len(pos) == 1:
 		t.Provider = pos[0]
+	case len(configured) == 1:
+		t.Provider = configured[0]
+	case len(configured) > 1:
+		return t, fmt.Errorf("several targets configured (%s): name one, e.g. env4ci push %s", strings.Join(configured, ", "), configured[0])
 	case remoteErr == nil && remote.Provider != "":
 		t.Provider = remote.Provider
 		t.from = append(t.from, "provider from git remote")
 	default:
-		return t, errors.New("provider required (github or gitlab); could not infer it from git remote origin")
+		return t, errors.New("provider required (github, gitlab or vault); could not infer it from env4ci.yaml or git remote origin")
 	}
-	if t.Provider != "github" && t.Provider != "gitlab" {
-		return t, fmt.Errorf("unknown provider %q (want github or gitlab)", t.Provider)
+	if t.Provider != "github" && t.Provider != "gitlab" && t.Provider != "vault" {
+		return t, fmt.Errorf("unknown provider %q (want github, gitlab or vault)", t.Provider)
 	}
 	remoteMatches := remoteErr == nil && remote.Provider == t.Provider
 
@@ -86,9 +97,28 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 			cfgRepo, cfgEnv, cfgBase, t.Protected = g.Project, g.Environment, g.BaseURL, g.Protected
 		}
 		cfgBase = first(cfgBase, os.Getenv("GITLAB_URL"), os.Getenv("CI_SERVER_URL"))
+	case "vault":
+		v := cfg.Targets.Vault
+		if v == nil {
+			v = &config.Vault{}
+		}
+		vc := *v
+		vc.Address = first(vc.Address, os.Getenv("VAULT_ADDR"))
+		vc.Namespace = first(vc.Namespace, os.Getenv("VAULT_NAMESPACE"))
+		if vc.Address == "" {
+			return t, errors.New("vault: address unknown (targets.vault.address or VAULT_ADDR)")
+		}
+		if vc.Path == "" {
+			return t, errors.New("vault: targets.vault.path is required, e.g. myapp/{env}")
+		}
+		t.Vault = &vc
+		cfgRepo = vc.Path
 	}
 	t.Repo = first(o.repo, cfgRepo)
 	t.BaseURL = cfgBase
+	if t.Provider == "vault" {
+		remoteMatches = false
+	}
 	if t.Repo == "" && remoteMatches {
 		t.Repo = remote.Path
 		t.from = append(t.from, "repo from git remote")
@@ -123,7 +153,27 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 
 	// Local file: -f, environments map, source, .env.
 	t.File = first(o.file, cfg.Environments[t.Environment], cfg.Source, ".env")
+
+	if t.Provider == "vault" {
+		t.Repo = vaultPath(t.Repo, t.Environment)
+	}
 	return t, nil
+}
+
+// vaultPath fills {env}; repository level becomes "shared". A path without
+// {env} gets the environment appended so environments never share a secret.
+func vaultPath(tmpl, env string) string {
+	name := env
+	if name == "" {
+		name = "shared"
+	}
+	if strings.Contains(tmpl, "{env}") {
+		return strings.ReplaceAll(tmpl, "{env}", name)
+	}
+	if env == "" {
+		return tmpl
+	}
+	return strings.TrimRight(tmpl, "/") + "/" + env
 }
 
 func newProvider(t target) (application.Provider, error) {
@@ -145,6 +195,28 @@ func newProvider(t target) (application.Provider, error) {
 			return nil, errors.New("gitlab: GITLAB_TOKEN not set")
 		}
 		return c, nil
+	case "vault":
+		token := os.Getenv("VAULT_TOKEN")
+		if token == "" {
+			token = vaultTokenFile()
+		}
+		if token == "" {
+			return nil, errors.New("vault: no token (set VAULT_TOKEN or run \"vault login\")")
+		}
+		return &vault.Client{Address: t.Vault.Address, Namespace: t.Vault.Namespace, Mount: t.Vault.Mount, Path: t.Repo, Token: token}, nil
 	}
 	return nil, fmt.Errorf("unknown provider %q", t.Provider)
+}
+
+// vaultTokenFile reads ~/.vault-token, written by "vault login".
+func vaultTokenFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(home, ".vault-token"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }

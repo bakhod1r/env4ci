@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -31,11 +32,12 @@ var version = "dev"
 const usage = `env4ci — sync environment variables and secrets across CI/CD platforms
 
 Usage:
-  env4ci init                       write env4ci.yaml template
+  env4ci init                       create env4ci.yaml (asks on a terminal)
+      --targets github,gitlab,vault --envs production,staging   non-interactive
   env4ci validate                   parse and classify the local file
-  env4ci diff  [github|gitlab]      show plan (never prints values)
-  env4ci push  [github|gitlab]      apply plan after confirmation
-  env4ci pull  [github|gitlab]      write readable remote values to a .env file
+  env4ci diff  [github|gitlab|vault] show plan (never prints values)
+  env4ci push  [github|gitlab|vault] apply plan after confirmation
+  env4ci pull  [github|gitlab|vault] write readable remote values to a .env file
 
   Provider, repository and environment default to: git remote origin, and the
   current branch mapped through "branches:" in env4ci.yaml.
@@ -47,6 +49,7 @@ Flags (after the subcommand):
   -c, --config   config file (default env4ci.yaml)
   -f, --file     local .env file (overrides config source)
   -e, --env      GitHub environment / GitLab environment scope
+  --all          diff/push: every environment in env4ci.yaml, one after another
   --no-verify    push: skip SSH/registry login checks
   --shared       target repository level / scope "*" (ignore branches:)
   --repo         GitHub owner/name or GitLab project path
@@ -58,7 +61,8 @@ Flags (after the subcommand):
   --dir          scan: project root (default .)
   --exit-code    diff: exit 2 when there are changes (for CI drift checks)
 
-Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN.
+Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN,
+VAULT_TOKEN (falls back to ~/.vault-token). Vault address: VAULT_ADDR.
 GitLab URL: targets.gitlab.base_url, else GITLAB_URL / CI_SERVER_URL, else https://gitlab.com.
 
 Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes.
@@ -86,7 +90,8 @@ type opts struct {
 	config, file, env, repo, out string
 	dir, by                      string
 	prune, yes, write, exitCode  bool
-	shared, noVerify             bool
+	shared, noVerify, all        bool
+	targets, envs                string
 }
 
 func parseFlags(args []string) (opts, []string, error) {
@@ -116,6 +121,9 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.exitCode, "exit-code", false, "")
 	fs.BoolVar(&o.shared, "shared", false, "")
 	fs.BoolVar(&o.noVerify, "no-verify", false, "")
+	fs.BoolVar(&o.all, "all", false, "")
+	fs.StringVar(&o.targets, "targets", "", "")
+	fs.StringVar(&o.envs, "envs", "", "")
 
 	// Allow flags before and after positional args.
 	var pos []string
@@ -147,7 +155,10 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		fmt.Fprintln(out, "env4ci", version)
 		return nil
 	case "init":
-		return cmdInit(o, out)
+		if o.targets == "" && o.envs == "" && !isTerminal(in) {
+			return cmdInit(o, out) // non-interactive, no flags: commented template
+		}
+		return cmdInitWizard(o, in, out, gitSource{dir: "."}, true)
 	}
 
 	cfg, err := config.Load(o.config)
@@ -188,8 +199,49 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 	}
 	if len(pos) > 1 {
-		return fmt.Errorf("%s: at most one provider argument (github or gitlab)", cmd)
+		return fmt.Errorf("%s: at most one provider argument (github, gitlab or vault)", cmd)
 	}
+	if !o.all {
+		return syncOne(ctx, cmd, cfg, o, pos, in, out)
+	}
+	if len(cfg.Environments) == 0 {
+		return errors.New("--all needs environments: in env4ci.yaml (run env4ci init)")
+	}
+	if cmd == "pull" {
+		return errors.New("--all is not supported for pull")
+	}
+	envs := make([]string, 0, len(cfg.Environments))
+	for e := range cfg.Environments {
+		envs = append(envs, e)
+	}
+	sort.Strings(envs)
+	var drift, failed bool
+	for i, e := range envs {
+		if i > 0 {
+			fmt.Fprintln(out)
+		}
+		oe := o
+		oe.env, oe.file, oe.shared = e, "", false
+		err := syncOne(ctx, cmd, cfg, oe, pos, in, out)
+		switch {
+		case errors.Is(err, errDrift):
+			drift = true
+		case err != nil:
+			fmt.Fprintf(out, "%s %s: %v\n", newPalette(out).Red("✗"), e, err)
+			failed = true
+		}
+	}
+	if failed {
+		return errors.New("one or more environments failed")
+	}
+	if drift {
+		return errDrift
+	}
+	return nil
+}
+
+// syncOne runs diff/push/pull for one resolved target.
+func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []string, in io.Reader, out io.Writer) error {
 	t, err := resolveTarget(cfg, o, pos, gitSource{dir: "."})
 	if err != nil {
 		return err

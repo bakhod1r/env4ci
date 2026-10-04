@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Env4CI</title>
-<meta name="description" content="Sync environment variables and secrets across CI/CD platforms — GitHub Actions and GitLab CI/CD.">
+<meta name="description" content="Sync environment variables and secrets across GitHub Actions, GitLab CI/CD and HashiCorp Vault.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -62,7 +62,7 @@ footer a{color:var(--muted)}
 <header class="hero">
   <div>
     <h1>Environment configuration for CI/CD.</h1>
-    <p class="lead">Sync <code>.env</code> files with GitHub Actions and GitLab CI/CD. Review a plan before anything changes. Secret values are never printed.</p>
+    <p class="lead">Sync <code>.env</code> files with GitHub Actions, GitLab CI/CD and HashiCorp Vault. Review a plan before anything changes. Secret values are never printed.</p>
     <div class="install"><code id="cmd">go install github.com/bakhod1r/env4ci/cmd/env4ci@latest</code><button id="copy" type="button">Copy</button></div>
     <div class="cta"><a class="btn primary" href="https://github.com/bakhod1r/env4ci#usage">Get started</a><a class="btn ghost" href="https://github.com/bakhod1r/env4ci">Source</a></div>
   </div>
@@ -85,6 +85,8 @@ footer a{color:var(--muted)}
     <div class="card"><h3>Unknown means secret</h3><p>Glob rules decide secret or variable. Keys that match no rule become secrets, so a value is never exposed by accident.</p></div>
     <div class="card"><h3>No surprise deletes</h3><p>Keys that exist only on the remote are left alone unless you pass <code>--prune</code>.</p></div>
     <div class="card"><h3>Tokens stay out of files</h3><p>Tokens come from <code>GITHUB_TOKEN</code> and <code>GITLAB_TOKEN</code>. The config file rejects unknown fields.</p></div>
+    <div class="card"><h3>Credentials tested first</h3><p>SSH keys log in to their server and registry tokens log in to ghcr.io or Docker Hub before anything is stored. If a check fails, nothing is written.</p></div>
+    <div class="card"><h3>Branch-aware</h3><p>Reads the repo from <code>git remote</code> and maps the current branch to its environment. A branch with no mapping is refused.</p></div>
     <div class="card"><h3>Pull without leaks</h3><p><code>pull</code> writes mode 0600, never overwrites a file, and adds it to <code>.gitignore</code>.</p></div>
   </div>
 </section>

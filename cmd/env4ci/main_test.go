@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -327,5 +329,81 @@ func TestVerifyCommandNoCredentials(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "No SSH keys") {
 		t.Fatalf("%s", out.String())
+	}
+}
+
+// fakeVault stores one KV v2 secret per path.
+func fakeVault(t *testing.T) (*httptest.Server, map[string]map[string]any) {
+	store := map[string]map[string]any{}
+	versions := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Vault-Token") != "vtok" {
+			w.WriteHeader(403)
+			return
+		}
+		p := strings.TrimPrefix(r.URL.Path, "/v1/secret/data/")
+		switch r.Method {
+		case http.MethodGet:
+			if versions[p] == 0 {
+				w.WriteHeader(404)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"data": store[p], "metadata": map[string]int{"version": versions[p]}}})
+		case http.MethodPost:
+			var body struct {
+				Data map[string]any `json:"data"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			store[p] = body.Data
+			versions[p]++
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, store
+}
+
+func TestVaultAllEnvironments(t *testing.T) {
+	srv, store := fakeVault(t)
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "env4ci.yaml")
+	prod := filepath.Join(dir, "prod.env")
+	stg := filepath.Join(dir, "stg.env")
+	os.WriteFile(prod, []byte("DATABASE_URL=postgres://prod\nAPP_PORT=80\n"), 0o600)
+	os.WriteFile(stg, []byte("DATABASE_URL=postgres://stg\n"), 0o600)
+	os.WriteFile(cfg, []byte(fmt.Sprintf(`
+environments: { production: %q, staging: %q }
+targets:
+  vault: { address: %q, path: "api/{env}" }
+`, prod, stg, srv.URL)), 0o600)
+	t.Setenv("VAULT_TOKEN", "vtok")
+	t.Setenv("VAULT_ADDR", "")
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"push", "--all", "-c", cfg, "-y"}, nil, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if store["api/production"]["DATABASE_URL"] != "postgres://prod" || store["api/production"]["APP_PORT"] != "80" ||
+		store["api/staging"]["DATABASE_URL"] != "postgres://stg" || len(store["api/staging"]) != 1 {
+		t.Fatalf("store = %v\n%s", store, out.String())
+	}
+	if strings.Contains(out.String(), "postgres://") {
+		t.Fatalf("value leaked:\n%s", out.String())
+	}
+
+	// Second diff: no drift.
+	if err := run(context.Background(), []string{"diff", "--all", "-c", cfg, "--exit-code"}, nil, io.Discard); err != nil {
+		t.Fatalf("drift after push: %v", err)
+	}
+	os.WriteFile(stg, []byte("DATABASE_URL=postgres://changed\n"), 0o600)
+	if err := run(context.Background(), []string{"diff", "--all", "-c", cfg, "--exit-code"}, nil, io.Discard); !errors.Is(err, errDrift) {
+		t.Fatalf("want drift, got %v", err)
+	}
+}
+
+func TestAllWithoutEnvironments(t *testing.T) {
+	dir := t.TempDir()
+	err := run(context.Background(), []string{"diff", "--all", "-c", filepath.Join(dir, "x.yaml")}, nil, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "environments:") {
+		t.Fatalf("err = %v", err)
 	}
 }
