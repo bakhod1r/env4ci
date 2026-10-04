@@ -38,6 +38,7 @@ Usage:
   env4ci diff  [github|gitlab|vault] show plan (never prints values)
   env4ci push  [github|gitlab|vault] apply plan after confirmation
   env4ci pull  [github|gitlab|vault] write readable remote values to a .env file
+  env4ci check [github|gitlab|vault] exit 2 if CI files use keys the provider lacks
 
   Provider, repository and environment default to: git remote origin, and the
   current branch mapped through "branches:" in env4ci.yaml.
@@ -62,14 +63,14 @@ Flags (after the subcommand):
   -o, --out      pull: output file (default .env.<env> or .env.pulled)
   --write        scan: write .env.example and .env.<group>.example (skips existing)
   --by           scan: group by "env" (default) or "branch"
-  --dir          scan: project root (default .)
+  --dir          scan/check: project root (default .)
   --exit-code    diff: exit 2 when there are changes (for CI drift checks)
 
 Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN,
 VAULT_TOKEN (falls back to ~/.vault-token). Vault address: VAULT_ADDR.
 GitLab URL: targets.gitlab.base_url, else GITLAB_URL / CI_SERVER_URL, else https://gitlab.com.
 
-Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes.
+Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes / check found missing keys.
 `
 
 // errDrift signals diff --exit-code found changes.
@@ -224,7 +225,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 			return errors.New("credential check failed")
 		}
 		return nil
-	case "diff", "plan", "push", "apply", "pull":
+	case "diff", "plan", "push", "apply", "pull", "check":
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 	}
@@ -286,6 +287,9 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 		return err
 	}
 	svc := application.Service{Provider: p}
+	if cmd == "check" {
+		return cmdCheck(ctx, cfg, o, t, p, out)
+	}
 	if cmd == "pull" {
 		return cmdPull(ctx, svc, o, out)
 	}

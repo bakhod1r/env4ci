@@ -22,7 +22,7 @@ ENV    ?=
 TARGET ?=
 ENV4CI_FLAGS = $(if $(ENV),-e $(ENV))
 
-.PHONY: env-gen env-scan env-verify env-diff env-diff-all env-push env-push-all env-pull env-drift
+.PHONY: env-gen env-scan env-verify env-diff env-diff-all env-push env-push-all env-pull env-drift env-check
 
 env-gen: ## create/complete .env4ci/ files from env4ci.yaml
 	$(ENV4CI) gen
@@ -50,6 +50,9 @@ env-pull: ## write remote values to a local file (ENV=, TARGET=)
 
 env-drift: ## exit 2 if any environment differs from its env file (CI check)
 	$(ENV4CI) diff $(TARGET) --all --exit-code
+
+env-check: ## exit 2 if CI files use keys the provider lacks (CI check)
+	$(ENV4CI) check $(TARGET) $(if $(ENV),-e $(ENV),--all)
 ` + makeEnd + "\n"
 
 // writeMakefile adds or refreshes the env4ci block, leaving the rest of the

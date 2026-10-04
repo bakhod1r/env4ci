@@ -142,6 +142,18 @@ github:bakhod1r/my-api@production
 
 Exit codes: `0` ok, `1` error, `2` drift (`--exit-code`).
 
+## Missing secrets check
+
+`env4ci check` scans the CI files and lists keys they use that the provider does not hold — no local `.env` needed. An environment target also counts repository-level (shared) keys.
+
+```console
+$ env4ci check github --all
+✗ missing in github:
+  SONAR_TOKEN                  secret   environment: production  (.github/workflows/ci.yml)
+```
+
+Exit `2` when something is missing (`make env-check`).
+
 ## Authentication
 
 | Provider | Token | Scope |

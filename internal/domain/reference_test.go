@@ -76,3 +76,22 @@ func TestGroupByBranch(t *testing.T) {
 		t.Fatalf("groups = %+v", groups)
 	}
 }
+
+func TestMissingRemote(t *testing.T) {
+	refs := []Reference{
+		{Key: "SHARED", Environment: ""},
+		{Key: "DB_URL", Environment: "production"},
+		{Key: "STG_ONLY", Environment: "staging"},
+		{Key: "API_KEY", Environment: "production"},
+	}
+	remote := []Remote{{Key: "API_KEY"}}
+
+	got := MissingRemote(refs, "production", remote)
+	if len(got) != 2 || got[0].Key != "SHARED" || got[1].Key != "DB_URL" {
+		t.Fatalf("production: %+v", got)
+	}
+	// Repository level needs only shared keys.
+	if got := MissingRemote(refs, "", []Remote{{Key: "SHARED"}}); len(got) != 0 {
+		t.Fatalf("shared: %+v", got)
+	}
+}

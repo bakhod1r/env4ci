@@ -146,6 +146,23 @@ func MissingFrom(refs []Reference, local []Variable) []Reference {
 	return out
 }
 
+// MissingRemote returns references a target needs but the provider lacks.
+// A target for environment env needs that environment's keys plus shared
+// ("") ones; remote should include both levels.
+func MissingRemote(refs []Reference, env string, remote []Remote) []Reference {
+	have := make(map[string]bool, len(remote))
+	for _, r := range remote {
+		have[r.Key] = true
+	}
+	var out []Reference
+	for _, r := range refs {
+		if (r.Environment == "" || r.Environment == env) && !have[r.Key] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func union(dst, src []string) []string {
 	for _, s := range src {
 		found := false
