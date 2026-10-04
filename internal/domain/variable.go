@@ -62,3 +62,15 @@ func ValidateKey(key string) error {
 	}
 	return nil
 }
+
+// SplitEmpty separates variables with values from keys whose value is empty.
+func SplitEmpty(vars []Variable) (filled []Variable, empty []string) {
+	for _, v := range vars {
+		if v.Value == "" {
+			empty = append(empty, v.Key)
+			continue
+		}
+		filled = append(filled, v)
+	}
+	return filled, empty
+}

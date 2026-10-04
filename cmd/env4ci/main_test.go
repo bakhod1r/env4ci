@@ -20,6 +20,9 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/bakhod1r/env4ci/internal/domain"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 )
 
 func TestValidateNeverPrintsValues(t *testing.T) {
@@ -406,5 +409,41 @@ func TestAllWithoutEnvironments(t *testing.T) {
 	err := run(context.Background(), []string{"diff", "--all", "-c", filepath.Join(dir, "x.yaml")}, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "environments:") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEmptyValuesNeverPushed(t *testing.T) {
+	srv, store := fakeVault(t)
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "env4ci.yaml")
+	env := filepath.Join(dir, "p.env")
+	os.WriteFile(env, []byte("DATABASE_URL=postgres://x\nJWT_SECRET=\n"), 0o600)
+	os.WriteFile(cfg, []byte("targets:\n  vault: { address: "+srv.URL+", path: app }\n"), 0o600)
+	t.Setenv("VAULT_TOKEN", "vtok")
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"push", "-c", cfg, "-f", env, "-y", "--shared"}, nil, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if _, ok := store["app"]["JWT_SECRET"]; ok || !strings.Contains(out.String(), "skipped 1 empty: JWT_SECRET") {
+		t.Fatalf("store=%v\n%s", store, out.String())
+	}
+	if err := run(context.Background(), []string{"push", "-c", cfg, "-f", env, "-y", "--shared", "--allow-empty"}, nil, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := store["app"]["JWT_SECRET"]; !ok || v != "" {
+		t.Fatalf("--allow-empty: %v", store)
+	}
+}
+
+func TestPublicRegistrySuppressesDetectedLogin(t *testing.T) {
+	cfg := config.Config{Checks: config.Checks{Registry: []config.RegistryCheck{{Registry: "ghcr.io", Public: true}}}}
+	vars := []domain.Variable{{Key: "GHCR_TOKEN", Value: "x"}, {Key: "GHCR_USER", Value: "u"}}
+	cs := credentialChecks(cfg, vars)
+	if len(cs) != 1 || !strings.Contains(cs[0].Name, "public") {
+		var names []string
+		for _, c := range cs {
+			names = append(names, c.Name)
+		}
+		t.Fatalf("checks: %v", names)
 	}
 }

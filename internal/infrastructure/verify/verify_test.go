@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -213,4 +215,63 @@ func TestChecksBuildsNamesWithoutValues(t *testing.T) {
 	if err := cs[2].Run(context.Background()); err == nil || !strings.Contains(err.Error(), "registry host unknown") {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestRegistryInsecureAndPublic(t *testing.T) {
+	srv := fakeRegistry(t, "basic") // httptest = plain HTTP
+	host := strings.TrimPrefix(srv.URL, "http://")
+	r := &Registry{Insecure: true}
+	if got := r.endpoint(host); got != srv.URL {
+		t.Fatalf("endpoint = %q", got)
+	}
+	if err := r.Login(context.Background(), host, "bob", "good-token"); err != nil {
+		t.Fatalf("insecure login: %v", err)
+	}
+	vars := []domain.Variable{{Key: "U", Value: "bob"}, {Key: "P", Value: "good-token"}}
+	cs := Checks(vars, nil, []domain.RegistryCredential{
+		{Registry: host, Username: "U", Password: "P", Insecure: true},
+		{Registry: "ghcr.io", Public: true},
+	})
+	if err := cs[0].Run(context.Background()); err != nil {
+		t.Fatalf("insecure check: %v", err)
+	}
+	if !strings.Contains(cs[1].Name, "public") || cs[1].Run(context.Background()) != nil {
+		t.Fatalf("public check: %q", cs[1].Name)
+	}
+}
+
+func TestRegistryCustomCA(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if u, p, ok := r.BasicAuth(); ok && u == "bob" && p == "good-token" {
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Basic realm="r"`)
+		w.WriteHeader(401)
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "https://")
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)
+	vars := []domain.Variable{{Key: "U", Value: "bob"}, {Key: "P", Value: "good-token"}}
+
+	without := Checks(vars, nil, []domain.RegistryCredential{{Registry: host, Username: "U", Password: "P"}})
+	if err := without[0].Run(context.Background()); err == nil {
+		t.Fatal("self-signed registry must fail without ca_file")
+	}
+	with := Checks(vars, nil, []domain.RegistryCredential{{Registry: host, Username: "U", Password: "P", CAFile: caFile}})
+	if err := with[0].Run(context.Background()); err != nil {
+		t.Fatalf("with ca_file: %v", err)
+	}
+	for _, bad := range []string{filepath.Join(t.TempDir(), "missing.pem"), caFileWith(t, "not a cert")} {
+		cs := Checks(vars, nil, []domain.RegistryCredential{{Registry: host, Username: "U", Password: "P", CAFile: bad}})
+		if err := cs[0].Run(context.Background()); err == nil || !strings.Contains(err.Error(), "ca_file") {
+			t.Fatalf("%s: err = %v", bad, err)
+		}
+	}
+}
+
+func caFileWith(t *testing.T, content string) string {
+	p := filepath.Join(t.TempDir(), "bad.pem")
+	os.WriteFile(p, []byte(content), 0o600)
+	return p
 }

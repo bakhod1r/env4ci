@@ -58,9 +58,12 @@ type SSHCheck struct {
 }
 
 type RegistryCheck struct {
-	Registry string `yaml:"registry"` // literal host, e.g. ghcr.io
+	Registry string `yaml:"registry"` // literal host, e.g. ghcr.io, harbor.corp.io:8443
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+	Public   bool   `yaml:"public"`   // images are public: no login to check
+	Insecure bool   `yaml:"insecure"` // self-hosted over plain HTTP
+	CAFile   string `yaml:"ca_file"`  // PEM CA bundle for a self-signed registry
 }
 
 type Rule struct {
@@ -183,6 +186,9 @@ rules:
 #     - { key: DEPLOY_KEY, host: DEPLOY_HOST, user: DEPLOY_USER, port: DEPLOY_PORT }
 #   registry:
 #     - { registry: ghcr.io, username: GHCR_USER, password: GHCR_TOKEN }
+#     - { registry: ghcr.io, public: true }                    # public images: nothing to check
+#     - { registry: registry.corp.local:5000, username: REG_USER, password: REG_PASS, insecure: true }
+#     - { registry: harbor.corp.io, username: HARBOR_USER, password: HARBOR_TOKEN, ca_file: certs/corp-ca.pem }
 
 # repo/project are read from "git remote origin" when omitted.
 targets:

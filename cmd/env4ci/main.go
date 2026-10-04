@@ -52,6 +52,7 @@ Flags (after the subcommand):
   -f, --file     local .env file (overrides config source)
   -e, --env      GitHub environment / GitLab environment scope
   --all          diff/push: every environment in env4ci.yaml, one after another
+  --allow-empty  diff/push: include keys with empty values (skipped by default)
   --no-verify    push: skip SSH/registry login checks
   --shared       target repository level / scope "*" (ignore branches:)
   --repo         GitHub owner/name or GitLab project path
@@ -93,6 +94,7 @@ type opts struct {
 	dir, by                      string
 	prune, yes, write, exitCode  bool
 	shared, noVerify, all        bool
+	allowEmpty                   bool
 	targets, envs                string
 }
 
@@ -124,6 +126,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.shared, "shared", false, "")
 	fs.BoolVar(&o.noVerify, "no-verify", false, "")
 	fs.BoolVar(&o.all, "all", false, "")
+	fs.BoolVar(&o.allowEmpty, "allow-empty", false, "")
 	fs.StringVar(&o.targets, "targets", "", "")
 	fs.StringVar(&o.envs, "envs", "", "")
 
@@ -195,6 +198,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		if err != nil {
 			return err
 		}
+		local = dropEmpty(local, o, out)
 		checks := credentialChecks(cfg, local)
 		if len(checks) == 0 {
 			fmt.Fprintln(out, "No SSH keys or registry credentials found.")
@@ -274,6 +278,7 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 	if err != nil {
 		return err
 	}
+	local = dropEmpty(local, o, out)
 	remote, err := p.List(ctx)
 	if err != nil {
 		return fmt.Errorf("%s: %w", p.Name(), err)
@@ -450,6 +455,20 @@ func cmdInit(o opts, out io.Writer) error {
 	return nil
 }
 
+// dropEmpty leaves out keys with empty values (unfilled placeholders from
+// env4ci gen), so they never overwrite real remote values, unless
+// --allow-empty is set.
+func dropEmpty(vars []domain.Variable, o opts, out io.Writer) []domain.Variable {
+	if o.allowEmpty {
+		return vars
+	}
+	filled, empty := domain.SplitEmpty(vars)
+	if len(empty) > 0 {
+		fmt.Fprintf(out, "%s skipped %d empty: %s (fill them, or --allow-empty)\n", newPalette(out).Yellow("!"), len(empty), strings.Join(empty, ", "))
+	}
+	return filled
+}
+
 func loadLocal(cfg config.Config, o opts) ([]domain.Variable, error) {
 	path := o.file
 	if path == "" {
@@ -616,22 +635,40 @@ func credentialChecks(cfg config.Config, vars []domain.Variable) []application.C
 	regByPw := map[string]domain.RegistryCredential{}
 	var regOrder []string
 	addReg := func(c domain.RegistryCredential) {
-		if _, ok := regByPw[c.Password]; !ok {
-			regOrder = append(regOrder, c.Password)
+		id := c.Password
+		if id == "" {
+			id = "host:" + c.Registry
 		}
-		regByPw[c.Password] = c
+		if _, ok := regByPw[id]; !ok {
+			regOrder = append(regOrder, id)
+		}
+		regByPw[id] = c
 	}
 	for _, c := range domain.DetectRegistry(vars) {
 		addReg(c)
 	}
 	for _, c := range cfg.Checks.Registry {
-		addReg(domain.RegistryCredential{Registry: c.Registry, Username: c.Username, Password: c.Password})
+		addReg(domain.RegistryCredential{Registry: c.Registry, Username: c.Username, Password: c.Password,
+			Public: c.Public, Insecure: c.Insecure, CAFile: c.CAFile})
 	}
 	var regCreds []domain.RegistryCredential
 	for _, k := range regOrder {
 		regCreds = append(regCreds, regByPw[k])
 	}
-	return verify.Checks(vars, sshCreds, regCreds)
+	// A host declared public needs no login: drop detected checks for it.
+	public := map[string]bool{}
+	for _, c := range regCreds {
+		if c.Public {
+			public[c.Registry] = true
+		}
+	}
+	kept := regCreds[:0]
+	for _, c := range regCreds {
+		if c.Public || !public[c.Registry] {
+			kept = append(kept, c)
+		}
+	}
+	return verify.Checks(vars, sshCreds, kept)
 }
 
 // runCredentialChecks prints results and returns an error if any failed.

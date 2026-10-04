@@ -5,6 +5,8 @@ package verify
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,15 +52,30 @@ func Checks(vars []domain.Variable, sshCreds []domain.SSHCredential, regCreds []
 			})
 		}})
 	}
-	reg := &Registry{}
 	for _, c := range regCreds {
 		c := c
+		if c.Public {
+			out = append(out, application.Check{
+				Name: fmt.Sprintf("registry %s (public, no login needed)", first(c.Registry, "?")),
+				Keys: c.Keys(),
+				Run:  func(context.Context) error { return nil },
+			})
+			continue
+		}
 		out = append(out, application.Check{
 			Name: fmt.Sprintf("registry %s (%s)", first(c.Registry, "?"), c.Password),
 			Keys: c.Keys(),
 			Run: func(ctx context.Context) error {
 				if c.Registry == "" {
 					return fmt.Errorf("registry host unknown: set REGISTRY or add checks.registry in env4ci.yaml")
+				}
+				reg := &Registry{Insecure: c.Insecure}
+				if c.CAFile != "" {
+					hc, err := clientWithCA(c.CAFile)
+					if err != nil {
+						return err
+					}
+					reg.HTTP = hc
 				}
 				return reg.Login(ctx, c.Registry, first(val[c.Username], "token"), val[c.Password])
 			},
@@ -175,7 +192,8 @@ func hostKeyCallback(content string) (ssh.HostKeyCallback, error) {
 
 // Registry logs in to a Docker Registry v2 API (ghcr.io, Docker Hub, GitLab, Harbor ...).
 type Registry struct {
-	HTTP httpDoer
+	HTTP     httpDoer
+	Insecure bool // plain HTTP (self-hosted registry without TLS)
 	// Endpoint maps a registry host to its API base; nil = https://host
 	// (docker.io -> https://registry-1.docker.io).
 	Endpoint func(host string) string
@@ -252,11 +270,15 @@ func (r *Registry) endpoint(host string) string {
 	if r.Endpoint != nil {
 		return r.Endpoint(host)
 	}
+	scheme := "https://"
+	if r.Insecure || strings.HasPrefix(host, "http://") {
+		scheme = "http://"
+	}
 	host = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://"), "/")
 	if host == "docker.io" || host == "index.docker.io" {
 		host = "registry-1.docker.io"
 	}
-	return "https://" + host
+	return scheme + host
 }
 
 func (r *Registry) get(ctx context.Context, u, user, password string) (*http.Response, error) {
@@ -271,6 +293,24 @@ func (r *Registry) get(ctx context.Context, u, user, password string) (*http.Res
 		r.HTTP = httpx.New()
 	}
 	return r.HTTP.Do(req)
+}
+
+// clientWithCA trusts the system roots plus the PEM certificates in caFile.
+func clientWithCA(caFile string) (*httpx.Client, error) {
+	pemBytes, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("ca_file: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil, fmt.Errorf("ca_file %s: no PEM certificates found", caFile)
+	}
+	c := httpx.New()
+	c.HTTP.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	return c, nil
 }
 
 func first(vals ...string) string {

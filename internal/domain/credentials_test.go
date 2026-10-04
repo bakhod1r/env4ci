@@ -75,3 +75,20 @@ func TestCredentialKeys(t *testing.T) {
 		t.Fatalf("%v", c.Keys())
 	}
 }
+
+func TestDetectSelfHostedRegistries(t *testing.T) {
+	got := DetectRegistry(vars(
+		"HARBOR_REGISTRY", "harbor.corp.io", "HARBOR_REGISTRY_USER", "robot", "HARBOR_REGISTRY_TOKEN", "t",
+		"GHE_REGISTRY", "containers.ghe.corp", "GHE_USERNAME", "me", "GHE_TOKEN", "t",
+		"DOCKER_REGISTRY", "registry.local:5000", "DOCKER_USERNAME", "u", "DOCKER_PASSWORD", "p",
+		"EMPTY_REGISTRY", "", "NOPASS_REGISTRY", "x.io",
+	))
+	want := []RegistryCredential{
+		{Registry: "registry.local:5000", Username: "DOCKER_USERNAME", Password: "DOCKER_PASSWORD"},
+		{Registry: "containers.ghe.corp", Username: "GHE_USERNAME", Password: "GHE_TOKEN"},
+		{Registry: "harbor.corp.io", Username: "HARBOR_REGISTRY_USER", Password: "HARBOR_REGISTRY_TOKEN"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %+v\nwant %+v", got, want)
+	}
+}

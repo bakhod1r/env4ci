@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bakhod1r/env4ci/internal/domain"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 )
 
@@ -196,5 +197,38 @@ func TestKeepConfigTracked(t *testing.T) {
 		if err := keepConfigTracked(cfg, file); (err == nil) != ok {
 			t.Errorf("%s: err=%v", file, err)
 		}
+	}
+}
+
+func TestGenRespectsCommentedKeys(t *testing.T) {
+	dir, cfgPath := genProject(t)
+	prod := filepath.Join(dir, ".env4ci", "production.env")
+	os.MkdirAll(filepath.Dir(prod), 0o700)
+	os.WriteFile(prod, []byte("# JWT_SECRET=disabled\n"), 0o600)
+	if err := run(context.Background(), []string{"gen", "-c", cfgPath, "--dir", dir}, nil, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(prod)
+	if strings.Contains(string(b), "\nJWT_SECRET=") {
+		t.Fatalf("commented key re-added:\n%s", b)
+	}
+}
+
+func TestEnvFileKeysGroupsSSHAndRegistry(t *testing.T) {
+	keys := envFileKeys("production", []domain.Reference{
+		{Key: "DATABASE_URL", Environment: "production"},
+		{Key: "SSH_HOST", Environment: "production"},
+		{Key: "CODECOV_TOKEN"},
+		{Key: "GHCR_TOKEN"},
+		{Key: "SSH_PRIVATE_KEY", Environment: "production"},
+		{Key: "SSH_USER", Environment: "production"},
+	})
+	var got []string
+	for _, k := range keys {
+		got = append(got, k.Group+":"+k.Key)
+	}
+	want := "ssh:SSH_HOST ssh:SSH_PRIVATE_KEY ssh:SSH_USER ssh:SSH_KNOWN_HOSTS registry:GHCR_TOKEN environment production:DATABASE_URL shared:CODECOV_TOKEN"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("got  %s\nwant %s", strings.Join(got, " "), want)
 	}
 }

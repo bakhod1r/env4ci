@@ -87,3 +87,30 @@ func TestClassifyHinted(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitEmpty(t *testing.T) {
+	f, e := SplitEmpty([]Variable{{Key: "A", Value: "1"}, {Key: "B"}, {Key: "C", Value: " "}})
+	if len(f) != 2 || f[1].Key != "C" || !reflect.DeepEqual(e, []string{"B"}) {
+		t.Fatalf("%v %v", f, e)
+	}
+}
+
+func TestFamilyAndKnownHosts(t *testing.T) {
+	for k, want := range map[string]string{
+		"SSH_HOST": "ssh", "DEPLOY_SSH_KEY": "ssh", "GIT_PRIVATE_KEY": "ssh", "SSH_KNOWN_HOSTS": "ssh", "DEPLOY_KNOWN_HOSTS": "ssh",
+		"REGISTRY": "registry", "REGISTRY_USER": "registry", "HARBOR_REGISTRY_TOKEN": "registry", "GHCR_TOKEN": "registry",
+		"DOCKERHUB_TOKEN": "registry", "DOCKER_PASSWORD": "registry", "DATABASE_URL": "", "API_KEY": "",
+	} {
+		if got := Family(k); got != want {
+			t.Errorf("Family(%q) = %q, want %q", k, got, want)
+		}
+	}
+	for k, want := range map[string]string{
+		"SSH_PRIVATE_KEY": "SSH_KNOWN_HOSTS", "SSH_KEY": "SSH_KNOWN_HOSTS", "DEPLOY_SSH_KEY": "DEPLOY_KNOWN_HOSTS",
+		"PROD_SSH_PRIVATE_KEY": "PROD_KNOWN_HOSTS", "GIT_PRIVATE_KEY": "GIT_KNOWN_HOSTS", "API_KEY": "", "SSH_HOST": "",
+	} {
+		if got := KnownHostsFor(k); got != want {
+			t.Errorf("KnownHostsFor(%q) = %q, want %q", k, got, want)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -111,19 +112,7 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		}
 		// Shared keys are listed too: pushing them per environment is valid
 		// (environment values override repository ones).
-		var keys []dotenv.ExampleKey
-		seen := map[string]bool{}
-		for _, r := range append(append([]domain.Reference(nil), byEnv[env]...), byEnv[""]...) {
-			if seen[r.Key] {
-				continue
-			}
-			seen[r.Key] = true
-			scope := "environment " + env
-			if r.Environment == "" {
-				scope = "shared"
-			}
-			keys = append(keys, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String() + " · " + scope, Stages: r.Stages, Branches: r.Branches, Sources: r.Sources, Group: scope})
-		}
+		keys := envFileKeys(env, append(append([]domain.Reference(nil), byEnv[env]...), byEnv[""]...))
 		header := "CI/CD variables"
 		if env != "" {
 			header += " for environment " + env
@@ -153,6 +142,55 @@ func mapValues(m map[string]string) []string {
 	return out
 }
 
+// envFileKeys orders an environment file: SSH credentials together, then
+// registry credentials, then environment keys, then shared keys. An SSH key
+// gets its known-hosts variable (read by env4ci verify) if CI lacks one.
+func envFileKeys(env string, refs []domain.Reference) []dotenv.ExampleKey {
+	var keys []dotenv.ExampleKey
+	seen := map[string]bool{}
+	for _, r := range refs {
+		if seen[r.Key] {
+			continue
+		}
+		seen[r.Key] = true
+		scope := "environment " + env
+		if r.Environment == "" {
+			scope = "shared"
+		}
+		group := domain.Family(r.Key)
+		if group == "" {
+			group = scope
+		}
+		keys = append(keys, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String() + " · " + scope,
+			Stages: r.Stages, Branches: r.Branches, Sources: r.Sources, Group: group})
+	}
+	for _, k := range append([]dotenv.ExampleKey(nil), keys...) {
+		kh := domain.KnownHostsFor(k.Key)
+		if kh == "" || seen[kh] {
+			continue
+		}
+		seen[kh] = true
+		keys = append(keys, dotenv.ExampleKey{Key: kh, Group: "ssh",
+			Kind: "secret · for env4ci verify: host key of the SSH server (ssh-keyscan -p <port> <host>)"})
+	}
+	rank := func(g string) int {
+		switch g {
+		case "ssh":
+			return 0
+		case "registry":
+			return 1
+		case "shared":
+			return 3
+		}
+		return 2
+	}
+	sort.SliceStable(keys, func(i, j int) bool { return rank(keys[i].Group) < rank(keys[j].Group) })
+	return keys
+}
+
+// commentedKey matches a disabled "# KEY=..." line; such keys count as present.
+var commentedKey = regexp.MustCompile(`(?m)^\s*#\s*([A-Za-z_][A-Za-z0-9_]*)=`)
+
 // writeOrAppend creates path (0600) with keys, or appends the keys it lacks.
 func writeOrAppend(path, header string, keys []dotenv.ExampleKey, out io.Writer, ui palette) error {
 	existing, err := os.ReadFile(path)
@@ -181,6 +219,9 @@ func writeOrAppend(path, header string, keys []dotenv.ExampleKey, out io.Writer,
 	have := map[string]bool{}
 	for _, e := range entries {
 		have[e.Key] = true
+	}
+	for _, m := range commentedKey.FindAllStringSubmatch(string(existing), -1) {
+		have[m[1]] = true // the user disabled it on purpose
 	}
 	var missing []dotenv.ExampleKey
 	for _, k := range keys {
