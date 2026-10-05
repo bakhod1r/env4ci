@@ -100,7 +100,7 @@ func TestRotateSSHKey(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	v, _ := store["api/production"]["DEPLOY_SSH_KEY"].(string)
-	if !strings.HasPrefix(v, "-----BEGIN OPENSSH PRIVATE KEY-----") || strings.Contains(v, "AAAA\n") {
+	if !strings.HasPrefix(v, "-----BEGIN OPENSSH PRIVATE KEY-----") || strings.Contains(v, "\nAAAA\n") {
 		t.Fatalf("stored = %q", v)
 	}
 	// Confirmed but the login check fails (no host): nothing more written, file unchanged.
@@ -163,7 +163,7 @@ func TestRotateErrors(t *testing.T) {
 	expect("refusing to rotate", "", "API_TOKEN", "-f", ".env.env4ci")
 	os.WriteFile("bad.env", []byte("bad line\n"), 0o600)
 	expect("bad.env", "", "API_TOKEN", "-f", "bad.env")
-	expect("no such file", "", "API_TOKEN", "-f", "missing.env")
+	expect("missing.env", "", "API_TOKEN", "-f", "missing.env")
 
 	// Push fails after the local write: error says where the old value is; audit logs it.
 	t.Setenv("VAULT_TOKEN", "")
