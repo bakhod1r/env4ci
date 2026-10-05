@@ -175,6 +175,19 @@ $ env4ci check github --all
 
 Exit `2` when something is missing (`make env-check`).
 
+## Value rules
+
+`validate:` in env4ci.yaml checks values before `diff` / `push` (and in `env4ci validate`). A failure names the key and the rule, never the value, and nothing is written.
+
+```yaml
+validate:
+  DATABASE_URL: { required: true, type: url, pattern: "^postgres(ql)?://" }
+  SENTRY_DSN:   { required_in: [production] }
+  APP_PORT:     { type: port }          # url | port | int | bool | email
+  JWT_SECRET:   { min_len: 32, max_len: 128 }
+  LOG_LEVEL:    { one_of: [debug, info, warn, error] }
+```
+
 ## Audit log
 
 With `audit_log:` in env4ci.yaml (`env4ci init` sets `env4ci-audit.jsonl`), every push appends one JSON line — commit the file to keep a history:

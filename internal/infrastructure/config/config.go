@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -32,6 +33,19 @@ type Config struct {
 	// AuditLog, when set, gets one JSON line per push: who, when, where,
 	// which keys. Values are never written.
 	AuditLog string `yaml:"audit_log"`
+	// Validate constrains values per key; diff/push/validate refuse bad ones.
+	Validate map[string]ValueCheck `yaml:"validate"`
+}
+
+// ValueCheck is the YAML form of domain.ValueRule.
+type ValueCheck struct {
+	Required   bool     `yaml:"required"`
+	RequiredIn []string `yaml:"required_in"`
+	Type       string   `yaml:"type"`
+	Pattern    string   `yaml:"pattern"`
+	MinLen     int      `yaml:"min_len"`
+	MaxLen     int      `yaml:"max_len"`
+	OneOf      []string `yaml:"one_of"`
 }
 
 // DefaultAuthFile is used when auth_file is not set.
@@ -157,6 +171,29 @@ func (c Config) Classifier() (domain.Classifier, error) {
 		rules = append(rules, domain.Rule{Pattern: r.Pattern, Kind: k})
 	}
 	return domain.NewClassifier(rules, fallback), nil
+}
+
+// ValueRules compiles validate: into domain rules.
+func (c Config) ValueRules() (map[string]domain.ValueRule, error) {
+	rules := make(map[string]domain.ValueRule, len(c.Validate))
+	for k, v := range c.Validate {
+		if !domain.ValidValueType(v.Type) {
+			return nil, fmt.Errorf("validate.%s: unknown type %q (want url, port, int, bool or email)", k, v.Type)
+		}
+		if v.MaxLen > 0 && v.MinLen > v.MaxLen {
+			return nil, fmt.Errorf("validate.%s: min_len %d > max_len %d", k, v.MinLen, v.MaxLen)
+		}
+		r := domain.ValueRule{Required: v.Required, RequiredIn: v.RequiredIn, Type: v.Type, MinLen: v.MinLen, MaxLen: v.MaxLen, OneOf: v.OneOf}
+		if v.Pattern != "" {
+			re, err := regexp.Compile(v.Pattern)
+			if err != nil {
+				return nil, fmt.Errorf("validate.%s: pattern: %w", k, err)
+			}
+			r.Pattern = re
+		}
+		rules[k] = r
+	}
+	return rules, nil
 }
 
 const Template = `# env4ci configuration. Tokens come from GITHUB_TOKEN / GITLAB_TOKEN, never this file.

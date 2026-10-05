@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
@@ -64,5 +65,38 @@ checks:
 	if c.Branches["release/*"] != "staging" || c.Environments["production"] != ".env.prod" ||
 		c.Checks.SSH[0].Host != "H" || c.Checks.Registry[0].Registry != "ghcr.io" {
 		t.Fatalf("%+v", c)
+	}
+}
+
+func TestValueRules(t *testing.T) {
+	load := func(body string) Config {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "env4ci.yaml")
+		os.WriteFile(p, []byte(body), 0o600)
+		c, err := Load(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	c := load(`validate:
+  DATABASE_URL: { required: true, type: url, pattern: "^postgres://" }
+  SENTRY_DSN: { required_in: [production] }
+  JWT_SECRET: { min_len: 32, max_len: 64 }
+  LOG_LEVEL: { one_of: [debug, info] }
+`)
+	r, err := c.ValueRules()
+	if err != nil || len(r) != 4 || !r["DATABASE_URL"].Required || r["DATABASE_URL"].Pattern.String() != "^postgres://" ||
+		r["SENTRY_DSN"].RequiredIn[0] != "production" || r["JWT_SECRET"].MaxLen != 64 || len(r["LOG_LEVEL"].OneOf) != 2 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	for body, want := range map[string]string{
+		"validate: { A: { type: uuid } }":             "unknown type",
+		"validate: { A: { pattern: \"(\" } }":         "validate.A: pattern",
+		"validate: { A: { min_len: 9, max_len: 3 } }": "min_len 9 > max_len 3",
+	} {
+		if _, err := load(body).ValueRules(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err = %v", body, err)
+		}
 	}
 }

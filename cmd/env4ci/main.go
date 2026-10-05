@@ -208,7 +208,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 			return err
 		}
 		printLocal(out, local)
-		return nil
+		return checkValues(cfg, local, o.env, out)
 	case "scan":
 		return cmdScan(cfg, o, out)
 	case "leaks":
@@ -307,6 +307,9 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 
 	local, err := loadLocal(cfg, o)
 	if err != nil {
+		return err
+	}
+	if err := checkValues(cfg, local, t.Environment, out); err != nil {
 		return err
 	}
 	local = dropEmpty(local, o, out)
@@ -734,6 +737,24 @@ func hasRemoteOnly(p domain.Plan) bool {
 		}
 	}
 	return false
+}
+
+// checkValues applies validate: rules; it prints each failure (key and
+// reason, never the value) and returns an error if any failed.
+func checkValues(cfg config.Config, vars []domain.Variable, env string, out io.Writer) error {
+	rules, err := cfg.ValueRules()
+	if err != nil {
+		return err
+	}
+	errs := domain.CheckValues(vars, rules, env)
+	if len(errs) == 0 {
+		return nil
+	}
+	pal := newPalette(out)
+	for _, e := range errs {
+		fmt.Fprintf(out, "%s %v\n", pal.Red("✗"), e)
+	}
+	return fmt.Errorf("%d value(s) failed validate: rules", len(errs))
 }
 
 func confirm(in io.Reader, out io.Writer, prompt string) bool {
