@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -108,7 +109,12 @@ func CurrentBranch(dir string) (string, error) {
 }
 
 func git(dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	out, err := gitRaw(dir, args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+func gitRaw(dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed binary, args from this package only
 	cmd.Dir = dir
@@ -116,11 +122,46 @@ func git(dir string, args ...string) (string, error) {
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(ee.Stderr)))
+			return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(ee.Stderr)))
 		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
+}
+
+// Files lists paths git tracks under dir, relative to dir. staged lists
+// only files added, copied or modified in the index (what a commit adds).
+func Files(dir string, staged bool) ([]string, error) {
+	args := []string{"ls-files", "-z"}
+	if staged {
+		args = []string{"diff", "--cached", "--name-only", "--relative", "--diff-filter=ACM", "-z"}
+	}
+	out, err := git(dir, args...)
+	if err != nil || out == "" {
+		return nil, err
+	}
+	return strings.Split(strings.TrimRight(out, "\x00"), "\x00"), nil
+}
+
+// Content returns a tracked file's bytes: the staged blob when staged,
+// else the working tree copy.
+func Content(dir, path string, staged bool) ([]byte, error) {
+	if staged {
+		return gitRaw(dir, "show", ":./"+filepath.ToSlash(path))
+	}
+	return os.ReadFile(filepath.Join(dir, path))
+}
+
+// HooksDir is where git looks for hooks (honours core.hooksPath and worktrees).
+func HooksDir(dir string) (string, error) {
+	p, err := git(dir, "rev-parse", "--git-path", "hooks")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	return p, nil
 }
 
 // IsIgnored reports whether git would ignore path (false outside a repo or

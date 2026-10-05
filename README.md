@@ -175,6 +175,20 @@ $ env4ci check github --all
 
 Exit `2` when something is missing (`make env-check`).
 
+## Leak check
+
+`env4ci leaks` reads the secret values from your local env files and searches every git-tracked file for them. It prints only `file:line` and the key name; values never appear.
+
+```console
+$ env4ci leaks
+✗ deploy/values.yaml:12  value of DATABASE_URL
+
+1 secret value(s) in tracked files. Remove them; if already pushed, rotate the secret.
+$ env4ci hook        # pre-commit hook: runs "env4ci leaks --staged" before each commit
+```
+
+Values shorter than 8 characters and non-secret keys are not searched. An existing pre-commit hook is never overwritten; env4ci tells you the line to add.
+
 ## Authentication
 
 | Provider | Token | Scope |

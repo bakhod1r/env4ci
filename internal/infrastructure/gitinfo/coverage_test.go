@@ -2,6 +2,7 @@ package gitinfo
 
 import (
 	"os"
+	"path/filepath"
 	"os/exec"
 	"strings"
 	"testing"
@@ -65,5 +66,16 @@ func TestGitBinaryMissing(t *testing.T) {
 	}
 	if IsIgnored(t.TempDir(), "x") {
 		t.Fatal("IsIgnored without git must be false")
+	}
+}
+
+func TestFilesAndHooksOutsideRepo(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	if _, err := Files(dir, false); err == nil {
+		t.Fatal("Files: want error")
+	}
+	if _, err := HooksDir(dir); err == nil {
+		t.Fatal("HooksDir: want error")
 	}
 }

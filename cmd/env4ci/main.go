@@ -47,6 +47,9 @@ Usage:
   env4ci makefile                   add/refresh env4ci targets in ./Makefile (make env-push ...)
   env4ci verify                     log in with SSH keys / registry tokens from the .env file
   env4ci scan                       list variables CI files expect; --write creates .env examples
+  env4ci leaks                      exit 2 if tracked files contain secret values from local env files
+                                    (--staged: only what the next commit adds)
+  env4ci hook                       install a git pre-commit hook running "env4ci leaks --staged"
   env4ci version
 
 Flags (after the subcommand):
@@ -70,7 +73,7 @@ Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN,
 VAULT_TOKEN (falls back to ~/.vault-token). Vault address: VAULT_ADDR.
 GitLab URL: targets.gitlab.base_url, else GITLAB_URL / CI_SERVER_URL, else https://gitlab.com.
 
-Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes / check found missing keys.
+Exit codes: 0 ok, 1 error, 2 diff --exit-code found changes / check found missing keys / leaks found values.
 `
 
 // errDrift signals diff --exit-code found changes.
@@ -97,7 +100,7 @@ func exitCode(err error, w io.Writer) int {
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, errDrift):
+	case errors.Is(err, errDrift), errors.Is(err, errLeak):
 		return 2
 	}
 	fmt.Fprintln(w, "error:", err)
@@ -109,7 +112,7 @@ type opts struct {
 	dir, by                      string
 	prune, yes, write, exitCode  bool
 	shared, noVerify, all        bool
-	allowEmpty                   bool
+	allowEmpty, staged           bool
 	targets, envs                string
 }
 
@@ -142,6 +145,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.noVerify, "no-verify", false, "")
 	fs.BoolVar(&o.all, "all", false, "")
 	fs.BoolVar(&o.allowEmpty, "allow-empty", false, "")
+	fs.BoolVar(&o.staged, "staged", false, "")
 	fs.StringVar(&o.targets, "targets", "", "")
 	fs.StringVar(&o.envs, "envs", "", "")
 
@@ -204,6 +208,10 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		return nil
 	case "scan":
 		return cmdScan(cfg, o, out)
+	case "leaks":
+		return cmdLeaks(cfg, o, out)
+	case "hook":
+		return cmdHook(out)
 	case "verify":
 		env, file, from, err := resolveEnvFile(cfg, o, gitSource{dir: "."}, "")
 		if err != nil {

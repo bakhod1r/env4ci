@@ -2,8 +2,10 @@ package gitinfo
 
 import (
 	"os"
+	"reflect"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,5 +115,58 @@ func TestBranchFromCIEnv(t *testing.T) {
 				t.Fatalf("got %q", got)
 			}
 		})
+	}
+}
+
+func TestFilesContentHooks(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull,
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	if fs, err := Files(dir, false); err != nil || fs != nil {
+		t.Fatalf("empty repo: %v %v", fs, err)
+	}
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one"), 0o644)
+	os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("staged"), 0o644)
+	git("add", "a.txt")
+	git("commit", "-qm", "a")
+	git("add", "sub/b.txt")
+	os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("worktree"), 0o644)
+
+	if fs, _ := Files(dir, false); !reflect.DeepEqual(fs, []string{"a.txt", "sub/b.txt"}) {
+		t.Fatalf("tracked: %v", fs)
+	}
+	sub := filepath.Join(dir, "sub")
+	if fs, _ := Files(sub, true); !reflect.DeepEqual(fs, []string{"b.txt"}) {
+		t.Fatalf("staged from sub: %v", fs)
+	}
+	if b, err := Content(sub, "b.txt", true); err != nil || string(b) != "staged" {
+		t.Fatalf("staged content: %q %v", b, err)
+	}
+	if b, _ := Content(sub, "b.txt", false); string(b) != "worktree" {
+		t.Fatalf("worktree content: %q", b)
+	}
+	if _, err := Content(dir, "nope", true); err == nil {
+		t.Fatal("want error")
+	}
+	h, err := HooksDir(sub)
+	if err != nil || !strings.HasSuffix(filepath.ToSlash(h), ".git/hooks") || !filepath.IsAbs(h) {
+		t.Fatalf("hooks = %q, %v", h, err)
+	}
+	git("config", "core.hooksPath", "/abs/hooks")
+	if h, _ := HooksDir(dir); filepath.ToSlash(h) != "/abs/hooks" && !strings.HasSuffix(filepath.ToSlash(h), "/abs/hooks") {
+		t.Fatalf("hooksPath = %q", h)
 	}
 }

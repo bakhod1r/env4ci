@@ -4,7 +4,7 @@ ENV    ?=
 TARGET ?=
 ENV4CI_FLAGS = $(if $(ENV),-e $(ENV))
 
-.PHONY: env-gen env-scan env-verify env-diff env-diff-all env-push env-push-all env-pull env-drift env-check
+.PHONY: env-gen env-scan env-verify env-diff env-diff-all env-push env-push-all env-pull env-drift env-check env-leaks
 
 env-gen: ## create/complete .env4ci/ files from env4ci.yaml
 	$(ENV4CI) gen
@@ -35,4 +35,7 @@ env-drift: ## exit 2 if any environment differs from its env file (CI check)
 
 env-check: ## exit 2 if CI files use keys the provider lacks (CI check)
 	$(ENV4CI) check $(TARGET) $(if $(ENV),-e $(ENV),--all)
+
+env-leaks: ## exit 2 if tracked files contain secret values from local env files
+	$(ENV4CI) leaks
 # <<< env4ci
