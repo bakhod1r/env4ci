@@ -76,3 +76,36 @@ func TestWriteExample(t *testing.T) {
 		t.Fatalf("not parseable: %v %v", entries, err)
 	}
 }
+
+func TestSet(t *testing.T) {
+	in := "# API_TOKEN=commented\nA=1\nexport API_TOKEN=old # note\nKEY=\"-----BEGIN\nbody\n-----END\"\nB='x'\nbad line\n"
+	got := Set(in, "API_TOKEN", "n\"ew")
+	want := "# API_TOKEN=commented\nA=1\nexport API_TOKEN=\"n\\\"ew\"\nKEY=\"-----BEGIN\nbody\n-----END\"\nB='x'\nbad line\n"
+	if got != want {
+		t.Fatalf("got\n%q\nwant\n%q", got, want)
+	}
+	got = Set(in, "KEY", "line1\nline2")
+	if !strings.Contains(got, "KEY=\"line1\\nline2\"\nB='x'") || strings.Contains(got, "body") {
+		t.Fatalf("multi-line: %q", got)
+	}
+	if got := Set("A=1", "B", "2"); got != "A=1\nB=\"2\"\n" {
+		t.Fatalf("append: %q", got)
+	}
+	if got := Set("", "B", "2"); got != "B=\"2\"\n" {
+		t.Fatalf("empty: %q", got)
+	}
+	if got := Set("A=1\nB=old", "B", "2"); got != "A=1\nB=\"2\"" {
+		t.Fatalf("no trailing newline: %q", got)
+	}
+	if got := Set("A=1\nA=2\n", "A", "3"); got != "A=1\nA=\"3\"\n" {
+		t.Fatalf("last wins: %q", got)
+	}
+	if got := Set("K=\"open\n", "K", "v"); got != "K=\"v\"\n" {
+		t.Fatalf("unterminated at EOF: %q", got)
+	}
+	entries, err := Parse(strings.NewReader(Set(in, "API_TOKEN", "n\"ew")))
+	if err == nil {
+		t.Fatal("bad line should still fail Parse")
+	}
+	_ = entries
+}

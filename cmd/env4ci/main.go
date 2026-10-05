@@ -40,6 +40,8 @@ Usage:
   env4ci diff  [github|gitlab|vault] show plan (never prints values)
   env4ci push  [github|gitlab|vault] apply plan after confirmation
   env4ci pull  [github|gitlab|vault] write readable remote values to a .env file
+  env4ci rotate KEY [provider]      new value (typed hidden, piped with -y, or --generate),
+                                    verify, back up the env file, push only KEY
   env4ci check [github|gitlab|vault] exit 2 if CI files use keys the provider lacks
 
   Provider, repository and environment default to: git remote origin, and the
@@ -69,6 +71,7 @@ Flags (after the subcommand):
   --write        scan: write .env.example and .env.<group>.example (skips existing)
   --by           scan: group by "env" (default) or "branch"
   --dir          scan/check: project root (default .)
+  --generate     rotate: random secret, or a new ed25519 key for SSH key variables
   --exit-code    diff: exit 2 when there are changes (for CI drift checks)
 
 Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN,
@@ -115,7 +118,7 @@ type opts struct {
 	dir, by                      string
 	prune, yes, write, exitCode  bool
 	shared, noVerify, all        bool
-	allowEmpty, staged           bool
+	allowEmpty, staged, generate bool
 	targets, envs                string
 }
 
@@ -149,6 +152,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.all, "all", false, "")
 	fs.BoolVar(&o.allowEmpty, "allow-empty", false, "")
 	fs.BoolVar(&o.staged, "staged", false, "")
+	fs.BoolVar(&o.generate, "generate", false, "")
 	fs.StringVar(&o.targets, "targets", "", "")
 	fs.StringVar(&o.envs, "envs", "", "")
 
@@ -215,6 +219,8 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		return cmdLeaks(cfg, o, out)
 	case "hook":
 		return cmdHook(out)
+	case "rotate":
+		return cmdRotate(ctx, cfg, o, pos, in, out)
 	case "verify":
 		env, file, from, err := resolveEnvFile(cfg, o, gitSource{dir: "."}, "")
 		if err != nil {
@@ -342,17 +348,24 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 	}
 	res, err := svc.Apply(ctx, local, plan, remote, application.ApplyOptions{Prune: o.prune})
 	fmt.Fprintf(out, "\n%s %d written, %d deleted\n", newPalette(out).Green("✓"), res.Written, res.Deleted)
-	if cfg.AuditLog != "" {
-		e := domain.AuditEntry{Time: now().UTC(), Actor: gitinfo.Actor("."), Provider: t.Provider, Target: t.Repo,
-			Environment: t.Environment, Changes: domain.AuditChanges(plan, o.prune), Result: "ok"}
-		if err != nil {
-			e.Result = err.Error()
-		}
-		if aerr := audit.Append(cfg.AuditLog, e); aerr != nil {
-			fmt.Fprintf(out, "%s audit log %s: %v\n", newPalette(out).Red("!"), cfg.AuditLog, aerr)
-		}
-	}
+	writeAudit(cfg, t, plan, o.prune, err, out)
 	return err
+}
+
+// writeAudit appends one push record when audit_log is set. A failure to
+// write it is reported but does not fail the push, which already happened.
+func writeAudit(cfg config.Config, t target, plan domain.Plan, prune bool, pushErr error, out io.Writer) {
+	if cfg.AuditLog == "" {
+		return
+	}
+	e := domain.AuditEntry{Time: now().UTC(), Actor: gitinfo.Actor("."), Provider: t.Provider, Target: t.Repo,
+		Environment: t.Environment, Changes: domain.AuditChanges(plan, prune), Result: "ok"}
+	if pushErr != nil {
+		e.Result = pushErr.Error()
+	}
+	if err := audit.Append(cfg.AuditLog, e); err != nil {
+		fmt.Fprintf(out, "%s audit log %s: %v\n", newPalette(out).Red("!"), cfg.AuditLog, err)
+	}
 }
 
 func cmdScan(cfg config.Config, o opts, out io.Writer) error {

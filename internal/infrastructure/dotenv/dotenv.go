@@ -183,3 +183,50 @@ func writeKeyLines(w io.Writer, keys []ExampleKey) error {
 	}
 	return nil
 }
+
+// Set replaces key's value in a .env file's content, keeping every other
+// line (comments, order, other quoting) as it was. The last definition of
+// key is replaced, matching Parse; a missing key is appended.
+func Set(content, key, value string) string {
+	lines := strings.SplitAfter(content, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	start, end, export := -1, -1, false
+	for i := 0; i < len(lines); i++ {
+		s := strings.TrimSpace(lines[i])
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		exp := strings.HasPrefix(s, "export ")
+		s = strings.TrimPrefix(s, "export ")
+		eq := strings.IndexByte(s, '=')
+		if eq <= 0 {
+			continue
+		}
+		first := i
+		raw := strings.TrimSpace(s[eq+1:])
+		for raw != "" && (raw[0] == '"' || raw[0] == '\'') && unterminated(raw) && i+1 < len(lines) {
+			i++
+			raw += "\n" + strings.TrimRight(lines[i], "\r\n")
+		}
+		if strings.TrimSpace(s[:eq]) == key {
+			start, end, export = first, i, exp
+		}
+	}
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`)
+	line := fmt.Sprintf("%s=\"%s\"\n", key, r.Replace(value))
+	if export {
+		line = "export " + line
+	}
+	if start < 0 {
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		return content + line
+	}
+	if !strings.HasSuffix(lines[end], "\n") {
+		line = strings.TrimSuffix(line, "\n")
+	}
+	return strings.Join(lines[:start], "") + line + strings.Join(lines[end+1:], "")
+}

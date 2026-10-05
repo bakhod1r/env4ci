@@ -175,6 +175,17 @@ $ env4ci check github --all
 
 Exit `2` when something is missing (`make env-check`).
 
+## Rotate a secret
+
+```bash
+env4ci rotate API_TOKEN -e production              # type the new value (hidden), review, confirm
+pbpaste | env4ci rotate API_TOKEN -e production -y # piped value needs -y
+env4ci rotate JWT_SECRET --generate                # random 32-byte secret (base64url)
+env4ci rotate DEPLOY_SSH_KEY --generate            # new ed25519 key; prints the public key
+```
+
+Order: new value → `validate:` rules → login check (SSH / registry, skip with `--no-verify`) → plan for that key only → confirm → old file copied to `<file>.bak` (0600, gitignored) → env file updated in place (comments and order kept) → only that key pushed → audit log. For a generated SSH key env4ci prints the `authorized_keys` line and waits until you have installed it, then logs in with the new key before anything is written. Values are never printed.
+
 ## Value rules
 
 `validate:` in env4ci.yaml checks values before `diff` / `push` (and in `env4ci validate`). A failure names the key and the rule, never the value, and nothing is written.
