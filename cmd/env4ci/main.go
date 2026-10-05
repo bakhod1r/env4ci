@@ -20,9 +20,11 @@ import (
 
 	"github.com/bakhod1r/env4ci/internal/application"
 	"github.com/bakhod1r/env4ci/internal/domain"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/audit"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/ciscan"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/dotenv"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/gitinfo"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/httpx"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/verify"
 )
@@ -81,6 +83,7 @@ var errDrift = errors.New("changes detected")
 
 // Process seams; tests replace them to drive main.
 var (
+	now              = time.Now
 	exit             = os.Exit
 	stdin  io.Reader = os.Stdin
 	stdout io.Writer = os.Stdout
@@ -336,6 +339,16 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 	}
 	res, err := svc.Apply(ctx, local, plan, remote, application.ApplyOptions{Prune: o.prune})
 	fmt.Fprintf(out, "\n%s %d written, %d deleted\n", newPalette(out).Green("✓"), res.Written, res.Deleted)
+	if cfg.AuditLog != "" {
+		e := domain.AuditEntry{Time: now().UTC(), Actor: gitinfo.Actor("."), Provider: t.Provider, Target: t.Repo,
+			Environment: t.Environment, Changes: domain.AuditChanges(plan, o.prune), Result: "ok"}
+		if err != nil {
+			e.Result = err.Error()
+		}
+		if aerr := audit.Append(cfg.AuditLog, e); aerr != nil {
+			fmt.Fprintf(out, "%s audit log %s: %v\n", newPalette(out).Red("!"), cfg.AuditLog, aerr)
+		}
+	}
 	return err
 }
 

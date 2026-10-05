@@ -102,6 +102,9 @@ branches:
 # env4ci's own tokens/addresses (generated, gitignored).
 auth_file: {{auth .Dir}}
 
+# One JSON line per push: who, when, where, which keys (never values). Commit it.
+audit_log: env4ci-audit.jsonl
+
 # Environment -> local file. Each file is gitignored; the folder stays tracked.
 environments:
 {{- range .Environments}}
@@ -137,6 +140,7 @@ func (p initPlan) config() config.Config {
 			{Pattern: "APP_*", Type: "variable"}, {Pattern: "LOG_*", Type: "variable"},
 		},
 		AuthFile:     authFileFor(p.Dir),
+		AuditLog:     "env4ci-audit.jsonl",
 		Branches:     map[string]string{},
 		Environments: map[string]string{},
 	}

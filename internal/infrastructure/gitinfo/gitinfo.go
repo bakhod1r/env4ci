@@ -170,3 +170,20 @@ func IsIgnored(dir, path string) bool {
 	_, err := git(dir, "check-ignore", "-q", "--no-index", path)
 	return err == nil
 }
+
+// Actor names who runs env4ci: the CI user, else git user.email, else the
+// OS user. Empty when none is known.
+func Actor(dir string) string {
+	for _, k := range []string{"GITHUB_ACTOR", "GITLAB_USER_LOGIN"} {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	if v, err := git(dir, "config", "user.email"); err == nil && v != "" {
+		return v
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	return os.Getenv("USERNAME")
+}

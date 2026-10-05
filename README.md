@@ -175,6 +175,16 @@ $ env4ci check github --all
 
 Exit `2` when something is missing (`make env-check`).
 
+## Audit log
+
+With `audit_log:` in env4ci.yaml (`env4ci init` sets `env4ci-audit.jsonl`), every push appends one JSON line — commit the file to keep a history:
+
+```json
+{"time":"2026-10-05T07:00:00Z","actor":"octocat","provider":"github","target":"acme/api","environment":"production","changes":[{"key":"DATABASE_URL","kind":"secret","action":"update"}],"result":"ok"}
+```
+
+Actor is `GITHUB_ACTOR` / `GITLAB_USER_LOGIN` in CI, else `git config user.email`. Values are never written. A failed push is logged with the error as `result`.
+
 ## Leak check
 
 `env4ci leaks` reads the secret values from your local env files and searches every git-tracked file for them. It prints only `file:line` and the key name; values never appear.

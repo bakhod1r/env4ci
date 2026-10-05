@@ -29,6 +29,9 @@ type Config struct {
 	// AuthFile holds env4ci's own settings (tokens, Vault address). It is
 	// loaded at start-up and never synced. Default .env.env4ci.
 	AuthFile string `yaml:"auth_file"`
+	// AuditLog, when set, gets one JSON line per push: who, when, where,
+	// which keys. Values are never written.
+	AuditLog string `yaml:"audit_log"`
 }
 
 // DefaultAuthFile is used when auth_file is not set.

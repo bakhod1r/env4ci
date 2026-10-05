@@ -2,8 +2,8 @@ package gitinfo
 
 import (
 	"os"
-	"path/filepath"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -77,5 +77,32 @@ func TestFilesAndHooksOutsideRepo(t *testing.T) {
 	}
 	if _, err := HooksDir(dir); err == nil {
 		t.Fatal("HooksDir: want error")
+	}
+}
+
+func TestActor(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("GITHUB_ACTOR", "")
+	t.Setenv("GITLAB_USER_LOGIN", "")
+	t.Setenv("USER", "")
+	t.Setenv("USERNAME", "win")
+	if a := Actor(dir); a != "win" {
+		t.Fatalf("USERNAME: %q", a)
+	}
+	t.Setenv("USER", "unix")
+	if a := Actor(dir); a != "unix" {
+		t.Fatalf("USER: %q", a)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(dir, "gitconfig"))
+	os.WriteFile(filepath.Join(dir, "gitconfig"), []byte("[user]\n\temail = dev@corp.io\n"), 0o644)
+	if a := Actor(dir); a != "dev@corp.io" {
+		t.Fatalf("git: %q", a)
+	}
+	t.Setenv("GITLAB_USER_LOGIN", "gl")
+	if a := Actor(dir); a != "gl" {
+		t.Fatalf("gitlab: %q", a)
 	}
 }

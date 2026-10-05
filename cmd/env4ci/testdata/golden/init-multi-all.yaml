@@ -20,6 +20,9 @@ branches:
 # env4ci's own tokens/addresses (generated, gitignored).
 auth_file: .github/env4ci.env
 
+# One JSON line per push: who, when, where, which keys (never values). Commit it.
+audit_log: env4ci-audit.jsonl
+
 # Environment -> local file. Each file is gitignored; the folder stays tracked.
 environments:
   production: .github/production.env

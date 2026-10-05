@@ -2,9 +2,9 @@ package gitinfo
 
 import (
 	"os"
-	"reflect"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
