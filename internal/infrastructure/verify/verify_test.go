@@ -80,6 +80,11 @@ func sshServer(t *testing.T, authorized ssh.PublicKey) (addr, knownHostsLine str
 	return addr, knownhosts.Line([]string{knownhosts.Normalize(addr)}, hostSigner.PublicKey())
 }
 
+// bareKey drops the host column: "ssh-ed25519 AAAA..." as some people paste it.
+func bareKey(line string) string {
+	return strings.Join(strings.Fields(line)[1:], " ")
+}
+
 func TestSSH(t *testing.T) {
 	good, goodPub := newKey(t, "")
 	other, _ := newKey(t, "")
@@ -107,6 +112,11 @@ func TestSSH(t *testing.T) {
 		{"passphrase wrong", SSHLogin{Key: locked, Passphrase: "nope"}, "passphrase is wrong"},
 		{"passphrase ok", SSHLogin{Key: locked, Passphrase: "s3cret", Host: lockedAddr, User: "deploy", KnownHosts: lockedKH}, ""},
 		{"server down", SSHLogin{Key: good, Host: "127.0.0.1:1", User: "deploy", KnownHosts: kh}, "connect"},
+		{"bare host key, no host column", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: bareKey(kh)}, ""},
+		{"bare host key, separate port", SSHLogin{Key: good, Host: host, Port: port, User: "deploy", KnownHosts: bareKey(kh)}, ""},
+		{"escaped newlines and keyscan comment", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: `# ` + addr + ` SSH-2.0-OpenSSH\n` + kh}, ""},
+		{"bare key of another server", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: bareKey(wrongKH)}, "does NOT match"},
+		{"not a key at all", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: "hello"}, "known_hosts value: line 1 is not a known_hosts entry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

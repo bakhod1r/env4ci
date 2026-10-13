@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,12 +90,14 @@ func Checks(vars []domain.Variable, sshCreds []domain.SSHCredential, regCreds []
 type SSHLogin struct {
 	Key, Passphrase  string
 	Host, User, Port string
-	KnownHosts       string // known_hosts content; empty = ~/.ssh/known_hosts
+	KnownHosts       string // known_hosts content; empty = ~/.ssh/known_hosts if it knows the host, else any host key
 }
 
 // SSH parses the key and, when host and user are known, completes an SSH
-// handshake and public-key authentication, then disconnects. Unknown or
-// changed host keys fail: a key is never sent to an unverified server.
+// handshake and public-key authentication, then disconnects. A host key
+// given in KnownHosts, or found in ~/.ssh/known_hosts, must match; a host
+// neither knows is accepted (the private key itself never leaves this
+// machine, only a signature does).
 func SSH(ctx context.Context, l SSHLogin) error {
 	signer, err := parseKey(l.Key, l.Passphrase)
 	if err != nil {
@@ -103,13 +106,13 @@ func SSH(ctx context.Context, l SSHLogin) error {
 	if l.Host == "" || l.User == "" {
 		return nil // parse-only; caller reports it as such via the check name
 	}
-	hostKeys, err := hostKeyCallback(l.KnownHosts)
-	if err != nil {
-		return err
-	}
 	addr := l.Host
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		addr = net.JoinHostPort(addr, first(l.Port, "22"))
+	}
+	hostKeys, err := hostKeyCallback(l.KnownHosts, addr)
+	if err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
@@ -170,8 +173,49 @@ var (
 	systemCertPool = x509.SystemCertPool
 )
 
-func hostKeyCallback(content string) (ssh.HostKeyCallback, error) {
+// knownHostsFor turns a known-hosts variable into known_hosts lines for
+// addr. It accepts what people paste: escaped "\n" on one line, ssh-keyscan
+// comments, and a bare host key ("ssh-ed25519 AAAA...") without the host
+// column, which then applies to addr only.
+func knownHostsFor(content, addr string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(content, `\n`, "\n"), "\n")
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "@") {
+			continue
+		}
+		f := strings.Fields(t)
+		if isPublicKey(f) {
+			lines[i] = knownhosts.Normalize(addr) + " " + t
+			continue
+		}
+		if len(f) > 1 && isPublicKey(f[1:]) {
+			continue
+		}
+		return "", fmt.Errorf("known_hosts value: line %d is not a known_hosts entry (want \"host ssh-ed25519 AAAA...\", e.g. from ssh-keyscan)", i+1)
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// isPublicKey reports whether f starts with "<key type> <base64 key>".
+func isPublicKey(f []string) bool {
+	if len(f) < 2 {
+		return false
+	}
+	raw, err := base64.StdEncoding.DecodeString(f[1])
+	if err != nil {
+		return false
+	}
+	pk, err := ssh.ParsePublicKey(raw)
+	return err == nil && pk.Type() == f[0]
+}
+
+func hostKeyCallback(content, addr string) (ssh.HostKeyCallback, error) {
 	if content != "" {
+		content, err := knownHostsFor(content, addr)
+		if err != nil {
+			return nil, err
+		}
 		f, err := createTemp("", "env4ci-known-hosts-*")
 		if err != nil {
 			return nil, err
@@ -186,13 +230,20 @@ func hostKeyCallback(content string) (ssh.HostKeyCallback, error) {
 	}
 	home, err := userHomeDir()
 	if err != nil {
-		return nil, err
+		return ssh.InsecureIgnoreHostKey(), nil // #nosec G106 -- no known_hosts to check against
 	}
-	path := filepath.Join(home, ".ssh", "known_hosts")
-	if _, err := os.Stat(path); err != nil {
-		return nil, fmt.Errorf("no known_hosts (%s) and no SSH_KNOWN_HOSTS variable: cannot verify the server", path)
+	known, err := knownhosts.New(filepath.Join(home, ".ssh", "known_hosts"))
+	if err != nil {
+		return ssh.InsecureIgnoreHostKey(), nil // #nosec G106 -- no known_hosts to check against
 	}
-	return knownhosts.New(path)
+	return func(host string, remote net.Addr, key ssh.PublicKey) error {
+		err := known(host, remote, key)
+		var keyErr *knownhosts.KeyError
+		if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
+			return nil // a host ~/.ssh/known_hosts does not list
+		}
+		return err
+	}, nil
 }
 
 // --- Registry ---

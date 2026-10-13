@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"io"
 	"net"
 	"net/http"
@@ -33,9 +34,9 @@ func TestHostKeyCallbackHomeKnownHosts(t *testing.T) {
 	defer func() { userHomeDir = old }()
 	userHomeDir = func() (string, error) { return home, nil }
 
-	// No ~/.ssh/known_hosts and no SSH_KNOWN_HOSTS: refuse.
-	if err := SSH(context.Background(), SSHLogin{Key: good, Host: addr, User: "deploy"}); err == nil || !strings.Contains(err.Error(), "no known_hosts") {
-		t.Fatalf("err = %v", err)
+	// No ~/.ssh/known_hosts and no SSH_KNOWN_HOSTS: any host key.
+	if err := SSH(context.Background(), SSHLogin{Key: good, Host: addr, User: "deploy"}); err != nil {
+		t.Fatalf("no known_hosts: %v", err)
 	}
 	// With ~/.ssh/known_hosts: works.
 	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
@@ -43,9 +44,22 @@ func TestHostKeyCallbackHomeKnownHosts(t *testing.T) {
 	if err := SSH(context.Background(), SSHLogin{Key: good, Host: addr, User: "deploy"}); err != nil {
 		t.Fatalf("home known_hosts: %v", err)
 	}
+	// ~/.ssh/known_hosts lists other hosts only: this one is accepted.
+	_, otherKH := sshServer(t, pub)
+	os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), []byte(otherKH+"\n"), 0o600)
+	if err := SSH(context.Background(), SSHLogin{Key: good, Host: addr, User: "deploy"}); err != nil {
+		t.Fatalf("unlisted host: %v", err)
+	}
+	// ~/.ssh/known_hosts has another key for this host: refuse.
+	changed := strings.Replace(otherKH, strings.Fields(otherKH)[0], knownhosts.Normalize(addr), 1)
+	os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), []byte(changed+"\n"), 0o600)
+	if err := SSH(context.Background(), SSHLogin{Key: good, Host: addr, User: "deploy"}); err == nil || !strings.Contains(err.Error(), "does NOT match") {
+		t.Fatalf("changed key: %v", err)
+	}
+	// No home folder: any host key.
 	userHomeDir = func() (string, error) { return "", errors.New("no home") }
-	if _, err := hostKeyCallback(""); err == nil {
-		t.Fatal("want home error")
+	if err := SSH(context.Background(), SSHLogin{Key: good, Host: addr, User: "deploy"}); err != nil {
+		t.Fatalf("no home: %v", err)
 	}
 }
 
@@ -53,7 +67,7 @@ func TestHostKeyCallbackTempFailures(t *testing.T) {
 	old := createTemp
 	defer func() { createTemp = old }()
 	createTemp = func(string, string) (*os.File, error) { return nil, errors.New("no tmp") }
-	if _, err := hostKeyCallback("x"); err == nil {
+	if _, err := hostKeyCallback("# x", "h:22"); err == nil {
 		t.Fatal("create: want error")
 	}
 	createTemp = func(dir, pattern string) (*os.File, error) {
@@ -63,7 +77,7 @@ func TestHostKeyCallbackTempFailures(t *testing.T) {
 		}
 		return f, err
 	}
-	if _, err := hostKeyCallback("x"); err == nil {
+	if _, err := hostKeyCallback("# x", "h:22"); err == nil {
 		t.Fatal("write: want error")
 	}
 }

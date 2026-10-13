@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- SSH check: known_hosts is optional. A `*_KNOWN_HOSTS` value (or a `~/.ssh/known_hosts` line for the host) is still enforced, and may be a bare key (`ssh-ed25519 AAAA...`, no host column) or escaped on one line; a host nobody lists is accepted. `gen` no longer adds a `*_KNOWN_HOSTS` line.
 - `diff` / `push` / `pull` / `check` on a terminal without `-e`, `--shared` or `--all` ask which environment of `env4ci.yaml` to use (number or name) instead of reading the git branch. A single environment is used without asking. Outside a terminal (CI) the branch mapping still decides.
 - `env4ci gen` re-reads the CI files and follows them both ways: an environment CI no longer deploys to (for example `dev` dropped from `branches: [dev, main]`) leaves `env4ci.yaml` (`environments:` and `branches:` lines), its env file is deleted and its `.gitignore` line removed. It asks first on a terminal, showing how many values the file holds; `-y` removes without asking; otherwise it is only reported.
 - `env4ci completion bash|zsh|fish`: tab completion of commands, each command's flags and provider names. `install.sh` installs the scripts.

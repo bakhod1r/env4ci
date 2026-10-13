@@ -517,15 +517,6 @@ func envFileKeys(env string, refs []domain.Reference) []dotenv.ExampleKey {
 		keys = append(keys, dotenv.ExampleKey{Key: r.Key, Kind: r.Kind.String() + " · " + scope,
 			Stages: r.Stages, Branches: r.Branches, Sources: r.Sources, Group: group})
 	}
-	for _, k := range append([]dotenv.ExampleKey(nil), keys...) {
-		kh := domain.KnownHostsFor(k.Key)
-		if kh == "" || seen[kh] {
-			continue
-		}
-		seen[kh] = true
-		keys = append(keys, dotenv.ExampleKey{Key: kh, Group: "ssh",
-			Kind: "secret · for env4ci verify: host key of the SSH server (ssh-keyscan -p <port> <host>)"})
-	}
 	rank := func(g string) int {
 		switch g {
 		case "ssh":

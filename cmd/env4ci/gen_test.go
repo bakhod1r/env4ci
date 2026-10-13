@@ -221,7 +221,7 @@ func TestEnvFileKeysGroupsSSHAndRegistry(t *testing.T) {
 	for _, k := range keys {
 		got = append(got, k.Group+":"+k.Key)
 	}
-	want := "ssh:SSH_HOST ssh:SSH_PRIVATE_KEY ssh:SSH_USER ssh:SSH_KNOWN_HOSTS registry:GHCR_TOKEN environment production:DATABASE_URL shared:CODECOV_TOKEN"
+	want := "ssh:SSH_HOST ssh:SSH_PRIVATE_KEY ssh:SSH_USER registry:GHCR_TOKEN environment production:DATABASE_URL shared:CODECOV_TOKEN"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("got  %s\nwant %s", strings.Join(got, " "), want)
 	}

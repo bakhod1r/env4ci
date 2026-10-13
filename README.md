@@ -123,7 +123,7 @@ Before `push` writes, credentials it is about to store are tried for real:
 
 - **SSH keys** (`SSH_PRIVATE_KEY` + `SSH_HOST` + `SSH_USER` [+ `SSH_PORT`, `SSH_KNOWN_HOSTS`, `*_PASSPHRASE`],
   or `DEPLOY_SSH_KEY` + `DEPLOY_HOST` ...): SSH handshake and public-key login, then disconnect; no command runs.
-  The host key must be in `SSH_KNOWN_HOSTS` or `~/.ssh/known_hosts` — a key is never offered to an unverified server.
+  `SSH_KNOWN_HOSTS` is optional. When it is set (or `~/.ssh/known_hosts` lists the host), the server's host key must match; otherwise any host key is accepted.
   A key without host/user is only parsed.
 - **Container registries**: `GHCR_TOKEN` (+ `GHCR_USER`) → ghcr.io, `DOCKERHUB_TOKEN` → Docker Hub,
   `REGISTRY_PASSWORD` + `REGISTRY_USER` + `REGISTRY` → any v2 registry.
