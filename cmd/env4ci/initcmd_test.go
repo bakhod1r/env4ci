@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,15 +67,64 @@ func TestRenderInitErrors(t *testing.T) {
 }
 
 func TestAskInit(t *testing.T) {
-	in := strings.NewReader("github, vault\nproduction,staging\n\nhttps://v:8200\n\nsvc/{env}\n")
+	in := strings.NewReader("github, vault\n\nhttps://v:8200\n\nsvc/{env}\n")
 	var out bytes.Buffer
 	got := askInit(in, &out, initPlan{Targets: []string{"github"}, Environments: []string{"production"}, Repo: "acme/api", VaultMount: "secret", VaultPath: "api/{env}"})
-	if strings.Join(got.Targets, ",") != "github,vault" || strings.Join(got.Environments, ",") != "production,staging" ||
+	if strings.Join(got.Targets, ",") != "github,vault" || strings.Join(got.Environments, ",") != "production" ||
 		got.Repo != "acme/api" || got.VaultAddr != "https://v:8200" || got.VaultMount != "secret" || got.VaultPath != "svc/{env}" {
 		t.Fatalf("got %+v\nprompts:\n%s", got, out.String())
 	}
 	if !strings.Contains(out.String(), "Repository (owner/name or group/project) [acme/api]") {
 		t.Fatalf("prompts:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "Environments") {
+		t.Fatalf("environments must come from the branch, not a prompt:\n%s", out.String())
+	}
+}
+
+func TestEnvForBranch(t *testing.T) {
+	for branch, want := range map[string]string{
+		"main": "production", "master": "production", "develop": "staging", "dev": "staging",
+		"qa": "qa", "Release/1.2": "release-1-2", "feature/login_v2": "feature-login_v2", "--": "production",
+	} {
+		if got := envForBranch(branch); got != want {
+			t.Errorf("envForBranch(%q) = %q, want %q", branch, got, want)
+		}
+	}
+}
+
+func TestInitWizardEnvironmentFromBranch(t *testing.T) {
+	for _, tc := range []struct {
+		git          fakeGit
+		flagEnvs     string
+		wantBranches map[string]string
+	}{
+		{git: fakeGit{remote: ghRemote, branch: "master"}, wantBranches: map[string]string{"master": "production"}},
+		{git: fakeGit{remote: ghRemote, branch: "feature/login"}, wantBranches: map[string]string{"feature/login": "feature-login"}},
+		{git: fakeGit{remote: ghRemote, branchErr: errors.New("detached")}, wantBranches: map[string]string{"main": "production"}},
+		{git: fakeGit{remote: ghRemote, branch: "master"}, flagEnvs: "production,staging", wantBranches: map[string]string{"master": "production", "develop": "staging"}},
+	} {
+		dir := t.TempDir()
+		cfg := filepath.Join(dir, "env4ci.yaml")
+		var out bytes.Buffer
+		if err := cmdInitWizard(opts{config: cfg, envs: tc.flagEnvs}, strings.NewReader("\n\n"), &out, tc.git, true); err != nil {
+			t.Fatal(err)
+		}
+		c, err := config.Load(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(c.Branches, tc.wantBranches) {
+			t.Errorf("branch %q: branches = %v, want %v\n%s", tc.git.branch, c.Branches, tc.wantBranches, out.String())
+		}
+		for _, env := range tc.wantBranches {
+			if _, err := os.Stat(filepath.Join(dir, ".github", env+".env")); err != nil {
+				t.Errorf("branch %q: environment file: %v", tc.git.branch, err)
+			}
+		}
+		if strings.Contains(out.String(), "Environments (") {
+			t.Errorf("asked for environments:\n%s", out.String())
+		}
 	}
 }
 
@@ -150,6 +200,66 @@ func TestSecretsDirFor(t *testing.T) {
 	} {
 		if got := secretsDirFor(tc.targets, tc.remote); got != tc.want {
 			t.Errorf("%v remote=%q: %q want %q", tc.targets, tc.remote, got, tc.want)
+		}
+	}
+}
+
+func TestInitWizardEnvironmentsFromCI(t *testing.T) {
+	for name, tc := range map[string]struct {
+		workflow     string
+		wantBranches map[string]string
+	}{
+		"every branch: current branch and guesses": {
+			workflow: "on: push\njobs:\n" +
+				"  prod:\n    runs-on: ubuntu-latest\n    environment: production\n    steps:\n      - run: echo ${{ secrets.DB_PASSWORD }}\n" +
+				"  stage:\n    runs-on: ubuntu-latest\n    environment: staging\n    steps:\n      - run: echo ${{ vars.APP_URL }}\n",
+			wantBranches: map[string]string{"master": "production", "develop": "staging"},
+		},
+		"one branch in CI wins": {
+			workflow: "on:\n  push:\n    branches: [release]\njobs:\n" +
+				"  qa:\n    runs-on: ubuntu-latest\n    environment: qa\n    steps:\n      - run: echo ${{ secrets.DB_PASSWORD }}\n",
+			wantBranches: map[string]string{"release": "qa"},
+		},
+		"unusable name falls back to the branch": {
+			workflow: "on: push\njobs:\n" +
+				"  x:\n    runs-on: ubuntu-latest\n    environment: ${{ inputs.target }}\n    steps:\n      - run: echo ${{ secrets.DB_PASSWORD }}\n",
+			wantBranches: map[string]string{"master": "production"},
+		},
+	} {
+		dir := t.TempDir()
+		os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755)
+		os.WriteFile(filepath.Join(dir, ".github", "workflows", "deploy.yml"), []byte(tc.workflow), 0o644)
+		cfg := filepath.Join(dir, "env4ci.yaml")
+		var out bytes.Buffer
+		if err := cmdInitWizard(opts{config: cfg}, strings.NewReader("\n\n"), &out, fakeGit{remote: ghRemote, branch: "master"}, true); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		c, err := config.Load(cfg)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(c.Branches, tc.wantBranches) {
+			t.Errorf("%s: branches = %v, want %v\n%s", name, c.Branches, tc.wantBranches, out.String())
+		}
+		for _, env := range tc.wantBranches {
+			b, err := os.ReadFile(filepath.Join(dir, ".github", env+".env"))
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+				continue
+			}
+			// The environment's name is the file's first key.
+			for _, line := range strings.Split(string(b), "\n") {
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				if line != "ENVIRONMENT="+env {
+					t.Errorf("%s: first key of %s.env = %q\n%s", name, env, line, b)
+				}
+				break
+			}
+			if strings.Count(string(b), "ENVIRONMENT=") != 1 {
+				t.Errorf("%s: ENVIRONMENT written more than once:\n%s", name, b)
+			}
 		}
 	}
 }

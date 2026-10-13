@@ -128,12 +128,12 @@ func TestRunInitTemplateAndExists(t *testing.T) {
 func TestRunInitWizardInteractivePath(t *testing.T) {
 	dir := t.TempDir()
 	o := opts{config: filepath.Join(dir, "env4ci.yaml")}
-	in := strings.NewReader("vault\nprod\n\n\n\n")
+	in := strings.NewReader("vault\n\n\n\n")
 	if err := cmdInitWizard(o, in, io.Discard, noGit, true); err != nil {
 		t.Fatal(err)
 	}
 	c, err := config.Load(o.config)
-	if err != nil || c.Targets.Vault == nil || c.Environments["prod"] == "" {
+	if err != nil || c.Targets.Vault == nil || c.Environments["production"] == "" {
 		t.Fatalf("%+v %v", c, err)
 	}
 }

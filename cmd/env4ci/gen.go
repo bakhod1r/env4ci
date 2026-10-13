@@ -111,6 +111,9 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		// Shared keys are listed too: pushing them per environment is valid
 		// (environment values override repository ones).
 		keys := envFileKeys(env, append(append([]domain.Reference(nil), byEnv[env]...), byEnv[""]...))
+		if env != "" {
+			keys = withEnvironmentName(env, cl.Classify(environmentKey), keys)
+		}
 		header := "CI/CD variables"
 		if env != "" {
 			header += " for environment " + env
@@ -129,6 +132,22 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		fmt.Fprintf(out, "%s %s is gitignored; it holds no secrets and should be committed (check .gitignore)\n", ui.Yellow("!"), o.config)
 	}
 	return nil
+}
+
+// environmentKey is the first key of every environment file: its value is
+// the environment's name, so the file says where it deploys to.
+const environmentKey = "ENVIRONMENT"
+
+// withEnvironmentName puts environmentKey=env first, replacing a CI
+// reference to the same key so it is written once.
+func withEnvironmentName(env string, kind domain.Kind, keys []dotenv.ExampleKey) []dotenv.ExampleKey {
+	out := []dotenv.ExampleKey{{Key: environmentKey, Value: env, Kind: kind.String() + " · environment name", Group: "environment name"}}
+	for _, k := range keys {
+		if k.Key != environmentKey {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func mapValues(m map[string]string) []string {

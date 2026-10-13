@@ -41,7 +41,7 @@ gh attestation verify env4ci_*_linux_amd64.tar.gz --repo bakhod1r/env4ci
 ## Quick start
 
 ```bash
-env4ci init                                  # asks: targets, environments, repo, Vault path
+env4ci init                                  # asks: targets, repo, Vault path; environments come from the CI files, else the branch
 env4ci init --targets github,vault --envs production,staging   # same, no prompts
 # init writes env4ci.yaml (commit it), then runs "env4ci gen" in your CI folder:
 #   .github/env4ci.env       env4ci's own settings: GITHUB_TOKEN / GITLAB_TOKEN / VAULT_ADDR / VAULT_TOKEN

@@ -9,19 +9,23 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
+	"github.com/bakhod1r/env4ci/internal/domain"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/ciscan"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/config"
 )
 
 // initPlan is everything "env4ci init" writes into env4ci.yaml.
 type initPlan struct {
-	Dir          string   // folder for generated files (see secretsDirFor); "" = root
-	remote       string   // git remote provider, decides Dir
-	Targets      []string // github, gitlab, vault
-	Environments []string // one or many
-	Repo         string   // owner/name or group/project
+	Dir          string            // folder for generated files (see secretsDirFor); "" = root
+	remote       string            // git remote provider, decides Dir
+	Targets      []string          // github, gitlab, vault
+	Environments []string          // one or many
+	branchOf     map[string]string // environment -> real branch it was derived from
+	Repo         string            // owner/name or group/project
 	VaultAddr    string
 	VaultMount   string
 	VaultPath    string
@@ -36,6 +40,34 @@ func branchFor(env string) string {
 		return "develop"
 	}
 	return env
+}
+
+// envForBranch names the environment a branch deploys to: the inverse of
+// branchFor, else the branch name with anything but letters, digits, - and _
+// turned into "-".
+func envForBranch(branch string) string {
+	switch branch {
+	case "main", "master":
+		return "production"
+	case "develop", "dev":
+		return "staging"
+	}
+	env := strings.Trim(strings.Map(func(r rune) rune {
+		if keyLike(string(r)) {
+			return r
+		}
+		return '-'
+	}, strings.ToLower(branch)), "-")
+	return first(env, "production")
+}
+
+// BranchOf is the branch that deploys to env: the checked-out branch the
+// environment came from, else a guess.
+func (p initPlan) BranchOf(env string) string {
+	if b, ok := p.branchOf[env]; ok {
+		return b
+	}
+	return branchFor(env)
 }
 
 // secretsDirFor puts generated files in the CI folder itself: .github for
@@ -71,7 +103,7 @@ func authFileFor(dir string) string {
 }
 
 var initTmpl = template.Must(template.New("init").Funcs(template.FuncMap{
-	"branch": branchFor, "file": envFileFor, "auth": authFileFor, "q": func(s string) string { return fmt.Sprintf("%q", s) },
+	"file": envFileFor, "auth": authFileFor, "q": func(s string) string { return fmt.Sprintf("%q", s) },
 	"has": func(xs []string, x string) bool {
 		for _, v := range xs {
 			if v == x {
@@ -92,11 +124,12 @@ rules:
   - { pattern: "*KEY*",      type: secret }
   - { pattern: "APP_*",      type: variable }
   - { pattern: "LOG_*",      type: variable }
+  - { pattern: "ENVIRONMENT", type: variable }
 
 # Branch -> environment. "env4ci push" on a branch writes to its environment.
 branches:
 {{- range .Environments}}
-  {{branch . | q}}: {{.}}
+  {{$.BranchOf . | q}}: {{.}}
 {{- end}}
 
 # env4ci's own tokens/addresses (generated, gitignored).
@@ -138,6 +171,7 @@ func (p initPlan) config() config.Config {
 			{Pattern: "*SECRET*", Type: "secret"}, {Pattern: "*PASSWORD*", Type: "secret"},
 			{Pattern: "*TOKEN*", Type: "secret"}, {Pattern: "*KEY*", Type: "secret"},
 			{Pattern: "APP_*", Type: "variable"}, {Pattern: "LOG_*", Type: "variable"},
+			{Pattern: environmentKey, Type: "variable"},
 		},
 		AuthFile:     authFileFor(p.Dir),
 		AuditLog:     "env4ci-audit.jsonl",
@@ -145,7 +179,7 @@ func (p initPlan) config() config.Config {
 		Environments: map[string]string{},
 	}
 	for _, e := range p.Environments {
-		c.Branches[branchFor(e)] = e
+		c.Branches[p.BranchOf(e)] = e
 		c.Environments[e] = envFileFor(p.Dir, e)
 	}
 	for _, t := range p.Targets {
@@ -181,7 +215,7 @@ func renderInit(p initPlan) ([]byte, error) {
 	}
 	seen := map[string]string{}
 	for _, e := range p.Environments {
-		b := branchFor(e)
+		b := p.BranchOf(e)
 		if prev, dup := seen[b]; dup {
 			return nil, fmt.Errorf("init: environments %q and %q both map to branch %q; edit branches: after init", prev, e, b)
 		}
@@ -215,7 +249,8 @@ func splitList(s string) []string {
 	return out
 }
 
-// defaultsFromGit pre-fills targets and repo from the remote.
+// defaultsFromGit pre-fills targets and repo from the remote, and the
+// environment from the checked-out branch (production when it is unknown).
 func defaultsFromGit(git gitReader) initPlan {
 	p := initPlan{Targets: []string{"github"}, Environments: []string{"production"}, VaultMount: "secret"}
 	if r, err := git.Remote(); err == nil {
@@ -224,6 +259,11 @@ func defaultsFromGit(git gitReader) initPlan {
 		if r.Provider != "" {
 			p.Targets = []string{r.Provider}
 		}
+	}
+	if b, err := git.Branch(); err == nil && b != "" {
+		env := envForBranch(b)
+		p.Environments = []string{env}
+		p.branchOf = map[string]string{env: b}
 	}
 	p.VaultAddr = os.Getenv("VAULT_ADDR")
 	name := "app"
@@ -234,7 +274,56 @@ func defaultsFromGit(git gitReader) initPlan {
 	return p
 }
 
-// askInit prompts on in/out; empty answers keep defaults.
+// environmentsFromCI replaces the branch-derived environment with the ones
+// the CI files under root deploy to; p is returned unchanged when they name
+// none. An environment's branch is the single branch its CI jobs run on,
+// else the checked-out branch it was derived from, else a guess.
+func environmentsFromCI(p initPlan, root string) initPlan {
+	cl, err := p.config().Classifier()
+	if err != nil {
+		return p
+	}
+	refs, err := ciscan.Scan(root, cl)
+	if err != nil {
+		return p
+	}
+	var envs []string
+	branchOf := map[string]string{}
+	used := map[string]bool{}
+	for _, g := range domain.GroupByEnvironment(refs) {
+		env := g.Environment
+		if !keyLike(env) {
+			continue // shared scope, or an expression like ${{ inputs.target }}
+		}
+		var ciBranches []string
+		for _, r := range g.Refs {
+			for _, b := range r.Branches {
+				if b != domain.BranchAll && b != domain.BranchTags && !contains(ciBranches, b) {
+					ciBranches = append(ciBranches, b)
+				}
+			}
+		}
+		branch := p.BranchOf(env)
+		if len(ciBranches) == 1 {
+			branch = ciBranches[0]
+		}
+		if used[branch] {
+			branch = env
+		}
+		used[branch] = true
+		branchOf[env] = branch
+		envs = append(envs, env)
+	}
+	if len(envs) == 0 {
+		return p
+	}
+	sort.Strings(envs)
+	p.Environments, p.branchOf = envs, branchOf
+	return p
+}
+
+// askInit prompts on in/out; empty answers keep defaults. Environments are
+// never asked: they come from the CI files, else the branch (or --envs).
 func askInit(in io.Reader, out io.Writer, d initPlan) initPlan {
 	r := bufio.NewReader(in)
 	ask := func(q, def string) string {
@@ -246,7 +335,6 @@ func askInit(in io.Reader, out io.Writer, d initPlan) initPlan {
 		return def
 	}
 	d.Targets = splitList(ask("Targets (github, gitlab, vault; comma-separated)", strings.Join(d.Targets, ",")))
-	d.Environments = splitList(ask("Environments (one or many, comma-separated)", strings.Join(d.Environments, ",")))
 	if contains(d.Targets, "github") || contains(d.Targets, "gitlab") {
 		d.Repo = ask("Repository (owner/name or group/project)", first(d.Repo, "owner/name"))
 	}
@@ -294,6 +382,9 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 	case interactive:
 		p = askInit(in, out, p)
 	}
+	if o.envs == "" {
+		p = environmentsFromCI(p, first(o.dir, filepath.Dir(o.config)))
+	}
 	b, err := renderInit(p)
 	if err != nil {
 		return err
@@ -303,6 +394,9 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 	}
 	ui := newPalette(out)
 	fmt.Fprintf(out, "%s wrote %s (targets: %s; environments: %s)\n", ui.Green("✓"), o.config, strings.Join(p.Targets, ", "), strings.Join(p.Environments, ", "))
+	for _, e := range p.Environments {
+		fmt.Fprintf(out, "  branch %s -> environment %s\n", p.BranchOf(e), e)
+	}
 
 	if err := cmdGen(p.config(), o, out); err != nil {
 		return err

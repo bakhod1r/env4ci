@@ -10,6 +10,7 @@ rules:
   - { pattern: "*KEY*",      type: secret }
   - { pattern: "APP_*",      type: variable }
   - { pattern: "LOG_*",      type: variable }
+  - { pattern: "ENVIRONMENT", type: variable }
 
 # Branch -> environment. "env4ci push" on a branch writes to its environment.
 branches:

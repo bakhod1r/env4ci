@@ -6,6 +6,8 @@
 - `env4ci gen`: `.env.env4ci` (env4ci tokens/addresses, auto-loaded, never synced) plus one `.env.<env>` per environment pre-filled from CI files; only appends missing keys. `init` runs it.
 - HashiCorp Vault KV v2 target (`targets.vault`, `path: app/{env}`), check-and-set writes, one version per push.
 - `env4ci init` wizard: one or many environments; github / gitlab / vault targets; `--targets`, `--envs`.
+- `env4ci init` no longer asks for environments: it takes the ones the CI files deploy to (`environment:`), else the checked-out branch decides (`main`/`master` -> `production`, `develop`/`dev` -> `staging`, else the branch name). `branches:` gets the branch the CI jobs run on, or the real checked-out branch. `--envs` still sets them by hand.
+- Every environment file starts with `ENVIRONMENT=<name>`; `init` classifies it as a variable.
 - `--all`: diff/push every environment in env4ci.yaml.
 - Repo, provider and base URL from `git remote origin`; environment from branch via `branches:`.
 - Credential checks before push: SSH login (host key verified), ghcr.io / Docker Hub / v2 registry login; `env4ci verify`.

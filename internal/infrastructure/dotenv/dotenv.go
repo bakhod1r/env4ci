@@ -128,6 +128,7 @@ func Write(w io.Writer, entries []Entry) error {
 // ExampleKey is one key for a generated .env.example.
 type ExampleKey struct {
 	Key      string
+	Value    string // pre-filled value; empty = KEY= for the user to fill
 	Kind     string
 	Stages   []string
 	Branches []string // omitted from the comment when it runs on every branch
@@ -177,7 +178,7 @@ func writeKeyLines(w io.Writer, keys []ExampleKey) error {
 		if i > 0 && k.Group != "" && k.Group == keys[i-1].Group {
 			sep = ""
 		}
-		if _, err := fmt.Fprintf(w, "%s# %s\n%s=\n", sep, comment, k.Key); err != nil {
+		if _, err := fmt.Fprintf(w, "%s# %s\n%s=%s\n", sep, comment, k.Key, k.Value); err != nil {
 			return err
 		}
 	}
