@@ -17,8 +17,8 @@ func TestTargetNames(t *testing.T) {
 	if (Targets{}).Names() != nil {
 		t.Fatal("empty")
 	}
-	got := Targets{GitHub: &GitHub{}, GitLab: &GitLab{}, Vault: &Vault{}}.Names()
-	if !reflect.DeepEqual(got, []string{"github", "gitlab", "vault"}) {
+	got := Targets{GitHub: &GitHub{}, GitLab: &GitLab{}, Vault: &Vault{}, Jenkins: &Jenkins{}}.Names()
+	if !reflect.DeepEqual(got, []string{"github", "gitlab", "vault", "jenkins"}) {
 		t.Fatalf("%v", got)
 	}
 }

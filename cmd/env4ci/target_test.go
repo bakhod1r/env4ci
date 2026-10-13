@@ -202,3 +202,12 @@ func TestResolveTargetJenkins(t *testing.T) {
 		t.Fatalf("%v %v", p, err)
 	}
 }
+
+func TestJenkinsDescribeAndFolder(t *testing.T) {
+	if got := (target{Provider: "jenkins", Repo: "app", File: ".env"}).Describe(); !strings.Contains(got, "folder app") {
+		t.Fatal(got)
+	}
+	if got := jenkinsFolder("{env}", ""); got != systemStore {
+		t.Fatal(got)
+	}
+}

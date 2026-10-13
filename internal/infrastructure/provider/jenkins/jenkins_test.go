@@ -85,3 +85,28 @@ func TestSystemStoreAndErrors(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestTransportErrors(t *testing.T) {
+	c := &Client{BaseURL: "://bad"}
+	c.KindAgnostic()
+	if _, err := c.List(context.Background()); err == nil {
+		t.Fatal("want bad URL error")
+	}
+	// Default client, closed port: the request itself fails.
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	c = &Client{BaseURL: srv.URL}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.Delete(ctx, "X", domain.KindSecret); err == nil {
+		t.Fatal("want transport error")
+	}
+}
+
+func TestPostOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	if err := (&Client{BaseURL: srv.URL, HTTP: srv.Client()}).Set(context.Background(), domain.Variable{Key: "A", Value: "1"}); err != nil {
+		t.Fatal(err)
+	}
+}

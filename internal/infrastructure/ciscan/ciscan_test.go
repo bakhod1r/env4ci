@@ -179,3 +179,11 @@ pipeline {
 		t.Fatalf("keys = %s", got)
 	}
 }
+
+func TestJenkinsfileUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "Jenkinsfile"), 0o755)
+	if _, err := Scan(dir, domain.DefaultClassifier()); err == nil {
+		t.Fatal("want read error")
+	}
+}

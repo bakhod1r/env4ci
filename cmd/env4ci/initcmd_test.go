@@ -301,3 +301,19 @@ func TestInitWizardCIEdgeCases(t *testing.T) {
 		t.Fatal("env4ci.yaml written despite the CI scan error")
 	}
 }
+
+func TestInitJenkins(t *testing.T) {
+	t.Setenv("JENKINS_URL", "")
+	var out bytes.Buffer
+	got := askInit(strings.NewReader("jenkins\nhttps://ci.example\n"), &out, initPlan{Environments: []string{"production"}})
+	if got.JenkinsURL != "https://ci.example" || strings.Join(got.Targets, ",") != "jenkins" {
+		t.Fatalf("got %+v\n%s", got, out.String())
+	}
+	b, err := renderInit(got)
+	if err != nil || !strings.Contains(string(b), "url: https://ci.example") {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	if c := got.config(); c.Targets.Jenkins == nil || c.Targets.Jenkins.URL != "https://ci.example" {
+		t.Fatalf("%+v", c.Targets)
+	}
+}
