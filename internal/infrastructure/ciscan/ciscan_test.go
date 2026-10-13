@@ -117,3 +117,65 @@ func TestKindHints(t *testing.T) {
 		t.Fatalf("%v", h)
 	}
 }
+
+func TestGitLabScriptLocalsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".gitlab-ci.yml"), []byte(`
+before_script:
+  - export TAG=$(git describe)
+job:
+  script:
+    - IMAGE=registry/app:$TAG
+    - for f in a b; do echo $f; done
+    - read -r ANSWER < file && echo $ANSWER
+    - export DEPLOY_TOKEN=$DEPLOY_TOKEN
+    - docker build --build-arg API_URL=$API_URL -t $IMAGE .
+    - local_only=1; echo $local_only $DB_PASSWORD
+`), 0o644)
+	refs, err := Scan(dir, domain.DefaultClassifier())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, r := range refs {
+		keys = append(keys, r.Key)
+	}
+	if got := strings.Join(keys, ","); got != "API_URL,DB_PASSWORD,DEPLOY_TOKEN" {
+		t.Fatalf("keys = %s\n%s", got, render(refs))
+	}
+}
+
+func TestJenkinsCredentials(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Jenkinsfile"), []byte(`
+pipeline {
+  environment {
+    DB = credentials('DB_PASSWORD')
+    BUILD_TAG2 = "${env.BUILD_NUMBER}"
+  }
+  stages {
+    stage('deploy') {
+      steps {
+        withCredentials([string(credentialsId: "API_TOKEN", variable: 'T')]) { sh 'echo $T' }
+        sshagent(credentials: ['DEPLOY_KEY', 'not-a-key']) { sh 'ssh host' }
+        echo params.VERSION
+      }
+    }
+  }
+}
+`), 0o644)
+	refs, err := Scan(dir, domain.DefaultClassifier())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, r := range refs {
+		if r.Provider != "jenkins" || r.Kind != domain.KindSecret {
+			t.Fatalf("%s", render(refs))
+		}
+		keys = append(keys, r.Key)
+	}
+	if got := strings.Join(keys, ","); got != "API_TOKEN,DB_PASSWORD,DEPLOY_KEY" {
+		t.Fatalf("keys = %s", got)
+	}
+}

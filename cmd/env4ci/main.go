@@ -39,12 +39,12 @@ Usage:
   env4ci init                       create env4ci.yaml (asks on a terminal)
       --targets github,gitlab,vault --envs production,staging   non-interactive
   env4ci validate                   parse and classify the local file
-  env4ci diff  [github|gitlab|vault] show plan (never prints values)
-  env4ci push  [github|gitlab|vault] apply plan after confirmation
-  env4ci pull  [github|gitlab|vault] write readable remote values to a .env file
+  env4ci diff  [github|gitlab|vault|jenkins] show plan (never prints values)
+  env4ci push  [github|gitlab|vault|jenkins] apply plan after confirmation
+  env4ci pull  [github|gitlab|vault|jenkins] write readable remote values to a .env file
   env4ci rotate KEY [provider]      new value (typed hidden, piped with -y, or --generate),
                                     verify, back up the env file, push only KEY
-  env4ci check [github|gitlab|vault] exit 2 if CI files use keys the provider lacks
+  env4ci check [github|gitlab|vault|jenkins] exit 2 if CI files use keys the provider lacks
 
   Provider, repository and environment default to: git remote origin, and the
   current branch mapped through "branches:" in env4ci.yaml.
@@ -280,7 +280,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 	}
 	if len(pos) > 1 {
-		return fmt.Errorf("%s: at most one provider argument (github, gitlab or vault)", cmd)
+		return fmt.Errorf("%s: at most one provider argument (github, gitlab, vault or jenkins)", cmd)
 	}
 	if !o.all && o.env == "" && !o.shared && len(cfg.Environments) > 0 && terminal(in) {
 		answers := bufio.NewReader(in) // shared with the [y/N] that follows

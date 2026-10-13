@@ -22,7 +22,7 @@ import (
 // StageAll marks usage outside any one stage (workflow-level env, GitLab default:).
 const StageAll = "all"
 
-// Scan looks for .github/workflows/*.yml|yaml and .gitlab-ci.yml under root.
+// Scan looks for .github/workflows/*.yml|yaml, .gitlab-ci.yml and Jenkinsfile under root.
 func Scan(root string, cl domain.Classifier) ([]domain.Reference, error) {
 	gh, err := scanGitHubDir(root)
 	if err != nil {
@@ -32,7 +32,11 @@ func Scan(root string, cl domain.Classifier) ([]domain.Reference, error) {
 	if err != nil {
 		return nil, err
 	}
-	return domain.MergeReferences(append(gh, gl...)), nil
+	jk, err := scanJenkinsDir(root)
+	if err != nil {
+		return nil, err
+	}
+	return domain.MergeReferences(append(append(gh, gl...), jk...)), nil
 }
 
 type file struct {
@@ -219,6 +223,7 @@ func scanGitLabDir(root string, cl domain.Classifier) ([]domain.Reference, error
 	for _, f := range files {
 		collectDefined(f.root, defined)
 		eachPair(f.root, func(_ string, v *yaml.Node) { collectDefined(v, defined) })
+		collectScriptLocals(f.root, defined)
 	}
 
 	var refs []domain.Reference
@@ -378,6 +383,43 @@ func scalars(n *yaml.Node) []string {
 		}
 	}
 	return out
+}
+
+var (
+	// A shell assignment at the start of a command: FOO=x, export FOO=x, local FOO=x.
+	shAssign = regexp.MustCompile(`(?:^|[;&|(]|\bthen|\bdo|\belse)\s*(?:(?:export|local|readonly|declare|typeset)\s+(?:-\w+\s+)*)?([A-Za-z_][A-Za-z0-9_]*)=(\S*)`)
+	shFor    = regexp.MustCompile(`\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b`)
+	shRead   = regexp.MustCompile(`\bread\s+(?:-\w+\s+)*([A-Za-z_][A-Za-z0-9_]*)`)
+)
+
+// collectScriptLocals marks variables a job's own shell script sets
+// (assignments, for loops, read): they never live in CI/CD settings.
+// `export X=$X` re-exports a CI variable and is not a definition.
+func collectScriptLocals(n *yaml.Node, into map[string]bool) {
+	var visit func(*yaml.Node)
+	visit = func(n *yaml.Node) {
+		eachPair(n, func(k string, v *yaml.Node) {
+			if k == "script" || k == "before_script" || k == "after_script" {
+				walkScalars(v, func(s string) {
+					for _, line := range strings.Split(s, "\n") {
+						for _, m := range shAssign.FindAllStringSubmatch(line, -1) {
+							if !strings.Contains(m[2], "$"+m[1]) && !strings.Contains(m[2], "${"+m[1]+"}") {
+								into[m[1]] = true
+							}
+						}
+						for _, re := range []*regexp.Regexp{shFor, shRead} {
+							for _, m := range re.FindAllStringSubmatch(line, -1) {
+								into[m[1]] = true
+							}
+						}
+					}
+				})
+				return
+			}
+			visit(v)
+		})
+	}
+	visit(n)
 }
 
 func collectDefined(n *yaml.Node, into map[string]bool) {

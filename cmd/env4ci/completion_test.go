@@ -27,7 +27,7 @@ func TestCompletionScripts(t *testing.T) {
 		"bash": {
 			"complete -o default -F _env4ci env4ci",
 			`gen) flags="-c --config --dir --help"; args="" ;;`,
-			`push) flags="-c --config -f --file -e --env --shared --repo --all --allow-empty --prune --no-verify -y --yes --help"; args="github gitlab vault" ;;`,
+			`push) flags="-c --config -f --file -e --env --shared --repo --all --allow-empty --prune --no-verify -y --yes --help"; args="github gitlab vault jenkins" ;;`,
 			`completion) flags="--help"; args="bash zsh fish" ;;`,
 		},
 		"zsh": {
@@ -38,14 +38,14 @@ func TestCompletionScripts(t *testing.T) {
 			`'--by[group by environment (default) or branch]:value:(env branch)'`,
 			`'--shared[repository level / scope "*" (ignore branches\:)]'`,
 			`'--repo[GitHub owner/name or GitLab project path]:owner/name:'`,
-			`'*:argument:(github gitlab vault)'`,
+			`'*:argument:(github gitlab vault jenkins)'`,
 			`'hook:install a git pre-commit hook running "env4ci leaks --staged"'`,
 		},
 		"fish": {
 			"complete -c env4ci -f -n __fish_use_subcommand -a gen -d 'create or complete",
 			"complete -c env4ci -n '__fish_seen_subcommand_from gen' -s c -l config -r -d 'config file (default env4ci.yaml)'",
 			"complete -c env4ci -n '__fish_seen_subcommand_from push' -l prune -d 'delete remote keys missing locally'",
-			"complete -c env4ci -f -n '__fish_seen_subcommand_from diff' -a 'github gitlab vault'",
+			"complete -c env4ci -f -n '__fish_seen_subcommand_from diff' -a 'github gitlab vault jenkins'",
 		},
 	} {
 		s := mustRun(t, "completion", shell)

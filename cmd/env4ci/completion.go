@@ -27,7 +27,7 @@ func flagParts(names string) (short, long, arg string) {
 func positionals(c helpCmd) []string {
 	switch {
 	case strings.Contains(c.args, "provider") || c.args == providerArg:
-		return []string{"github", "gitlab", "vault"}
+		return []string{"github", "gitlab", "vault", "jenkins"}
 	case c.name == "completion":
 		return completionShells
 	case c.name == "help":

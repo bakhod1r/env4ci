@@ -167,3 +167,38 @@ func TestDescribe(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestResolveTargetJenkins(t *testing.T) {
+	t.Setenv("JENKINS_URL", "")
+	cfg := config.Config{Targets: config.Targets{Jenkins: &config.Jenkins{URL: "https://ci.example", Folder: "app/{env}"}}}
+	got, err := resolveTarget(cfg, opts{env: "production"}, nil, fakeGit{remote: ghRemote, branch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "jenkins" || got.Repo != "app/production" || got.BaseURL != "https://ci.example" {
+		t.Fatalf("%+v", got)
+	}
+	got, _ = resolveTarget(cfg, opts{shared: true}, nil, noGit)
+	if got.Repo != "app" {
+		t.Fatalf("shared repo = %q", got.Repo)
+	}
+	cfg.Targets.Jenkins = &config.Jenkins{URL: "https://ci.example"}
+	got, _ = resolveTarget(cfg, opts{env: "production"}, nil, noGit)
+	if got.Repo != systemStore {
+		t.Fatalf("system repo = %q", got.Repo)
+	}
+	cfg.Targets.Jenkins = &config.Jenkins{}
+	if _, err := resolveTarget(cfg, opts{}, nil, noGit); err == nil {
+		t.Fatal("want missing url error")
+	}
+	t.Setenv("JENKINS_USER", "")
+	if _, err := newProvider(target{Provider: "jenkins", Repo: systemStore}); err == nil {
+		t.Fatal("want missing token error")
+	}
+	t.Setenv("JENKINS_USER", "u")
+	t.Setenv("JENKINS_TOKEN", "x")
+	p, err := newProvider(target{Provider: "jenkins", Repo: "app/production", BaseURL: "https://ci.example"})
+	if err != nil || p.Name() != "jenkins:app/production" {
+		t.Fatalf("%v %v", p, err)
+	}
+}

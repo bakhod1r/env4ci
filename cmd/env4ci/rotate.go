@@ -31,7 +31,7 @@ var (
 // prints its public half for the server's authorized_keys.
 func cmdRotate(ctx context.Context, cfg config.Config, o opts, pos []string, in io.Reader, out io.Writer) error {
 	if len(pos) == 0 || len(pos) > 2 {
-		return errors.New("usage: env4ci rotate KEY [github|gitlab|vault] [-e env] [--generate]")
+		return errors.New("usage: env4ci rotate KEY [github|gitlab|vault|jenkins] [-e env] [--generate]")
 	}
 	key, pos := pos[0], pos[1:]
 	t, err := resolveTarget(cfg, o, pos, gitSource{dir: "."})

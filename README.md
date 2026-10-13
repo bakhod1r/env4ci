@@ -2,7 +2,7 @@
 
 > Environment configuration for CI/CD.
 
-Sync environment variables and secrets between local `.env` files, **GitHub Actions**, **GitLab CI/CD** and **HashiCorp Vault**.
+Sync environment variables and secrets between local `.env` files, **GitHub Actions**, **GitLab CI/CD**, **HashiCorp Vault** and **Jenkins** credentials.
 
 [![ci](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml/badge.svg)](https://github.com/bakhod1r/env4ci/actions/workflows/ci.yml)
 
@@ -116,6 +116,28 @@ Token: `VAULT_TOKEN`, else `~/.vault-token` (`vault login`). `VAULT_NAMESPACE` f
 Every key of an environment lives in one secret; a push is one check-and-set write (one new version),
 and fails if someone else changed the secret meanwhile. Vault has no secret/variable split, so
 classification is ignored there. `pull` reads every value back.
+
+## Jenkins
+
+```yaml
+targets:
+  jenkins:
+    url: https://jenkins.example.com   # or JENKINS_URL
+    folder: myapp/{env}                # omit for the system (global) credentials store
+```
+
+Auth: `JENKINS_USER` + `JENKINS_TOKEN` (an API token, so no CSRF crumb is needed).
+Every key is a *Secret text* credential whose ID is the key; there is no secret/variable split.
+Jenkins never returns secret values, so `diff` shows existing keys as unverifiable, `push` rewrites them,
+and `pull` lists names only. `scan` / `gen` / `check` read `Jenkinsfile` (`Jenkinsfile.*`, `*.Jenkinsfile`):
+`credentials('ID')`, `credentialsId: 'ID'` and `sshagent(['ID'])`. IDs that are not valid env names
+(`docker-hub`) are skipped.
+
+## What scan picks up
+
+Only keys you can store in the CI's settings: GitHub `${{ secrets.X }}` / `${{ vars.X }}` (not `GITHUB_TOKEN`),
+GitLab `$X` minus predefined (`CI_*`, `GITLAB_*`), `variables:` and variables the job's own script sets
+(`X=...`, `export X=...`, `for X in`, `read X`; `export X=$X` still counts), Jenkins credential IDs.
 
 ## Credential checks
 

@@ -22,13 +22,14 @@ import (
 type initPlan struct {
 	Dir          string            // folder for generated files (see secretsDirFor); "" = root
 	remote       string            // git remote provider, decides Dir
-	Targets      []string          // github, gitlab, vault
+	Targets      []string          // github, gitlab, vault, jenkins
 	Environments []string          // one or many
 	branchOf     map[string]string // environment -> real branch it was derived from
 	Repo         string            // owner/name or group/project
 	VaultAddr    string
 	VaultMount   string
 	VaultPath    string
+	JenkinsURL   string
 }
 
 // branchFor guesses the branch that deploys to env.
@@ -164,6 +165,11 @@ targets:
     mount: {{.VaultMount}}
     path: {{.VaultPath}}   # {env} = environment name
 {{- end}}
+{{- if has .Targets "jenkins"}}
+  jenkins:
+    url: {{if .JenkinsURL}}{{.JenkinsURL}}{{else}}https://jenkins.example.com{{end}}
+    # folder: myapp/{env}   # omit for the system credentials store
+{{- end}}
 `))
 
 // config is the Config renderInit's YAML describes (tests assert they match).
@@ -194,6 +200,8 @@ func (p initPlan) config() config.Config {
 			c.Targets.GitLab = &config.GitLab{Project: first(p.Repo, "group/project"), Protected: true}
 		case "vault":
 			c.Targets.Vault = &config.Vault{Address: first(p.VaultAddr, "https://vault.example.com:8200"), Mount: p.VaultMount, Path: p.VaultPath}
+		case "jenkins":
+			c.Targets.Jenkins = &config.Jenkins{URL: first(p.JenkinsURL, "https://jenkins.example.com")}
 		}
 	}
 	return c
@@ -202,14 +210,14 @@ func (p initPlan) config() config.Config {
 func renderInit(p initPlan) ([]byte, error) {
 	p.Dir = secretsDirFor(p.Targets, p.remote)
 	if len(p.Targets) == 0 {
-		return nil, errors.New("init: at least one target (github, gitlab, vault)")
+		return nil, errors.New("init: at least one target (github, gitlab, vault, jenkins)")
 	}
 	if len(p.Environments) == 0 {
 		return nil, errors.New("init: at least one environment")
 	}
 	for _, t := range p.Targets {
-		if t != "github" && t != "gitlab" && t != "vault" {
-			return nil, fmt.Errorf("init: unknown target %q (want github, gitlab, vault)", t)
+		if t != "github" && t != "gitlab" && t != "vault" && t != "jenkins" {
+			return nil, fmt.Errorf("init: unknown target %q (want github, gitlab, vault, jenkins)", t)
 		}
 	}
 	for _, e := range p.Environments {
@@ -387,7 +395,7 @@ func askInit(in io.Reader, out io.Writer, d initPlan) initPlan {
 		}
 		return def
 	}
-	d.Targets = splitList(ask("Targets (github, gitlab, vault; comma-separated)", strings.Join(d.Targets, ",")))
+	d.Targets = splitList(ask("Targets (github, gitlab, vault, jenkins; comma-separated)", strings.Join(d.Targets, ",")))
 	if contains(d.Targets, "github") || contains(d.Targets, "gitlab") {
 		d.Repo = ask("Repository (owner/name or group/project)", first(d.Repo, "owner/name"))
 	}
@@ -395,6 +403,9 @@ func askInit(in io.Reader, out io.Writer, d initPlan) initPlan {
 		d.VaultAddr = ask("Vault address", first(d.VaultAddr, "https://vault.example.com:8200"))
 		d.VaultMount = ask("Vault KV v2 mount", d.VaultMount)
 		d.VaultPath = ask("Vault path ({env} = environment)", d.VaultPath)
+	}
+	if contains(d.Targets, "jenkins") {
+		d.JenkinsURL = ask("Jenkins URL", first(d.JenkinsURL, os.Getenv("JENKINS_URL"), "https://jenkins.example.com"))
 	}
 	return d
 }

@@ -9,7 +9,7 @@ import (
 func TestCommandHelp(t *testing.T) {
 	for _, args := range [][]string{{"help", "push"}, {"push", "--help"}, {"push", "-h"}, {"push", "github", "-help"}, {"apply", "--help"}} {
 		s := mustRun(t, args...)
-		for _, want := range []string{"Usage: env4ci push [github|gitlab|vault]", "apply the plan after confirmation", "--prune", "-y, --yes", "All commands: env4ci help"} {
+		for _, want := range []string{"Usage: env4ci push [github|gitlab|vault|jenkins]", "apply the plan after confirmation", "--prune", "-y, --yes", "All commands: env4ci help"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("%v: missing %q in\n%s", args, want, s)
 			}
@@ -96,7 +96,7 @@ func TestManPage(t *testing.T) {
 	for _, want := range []string{
 		`.TH ENV4CI 1 "" "env4ci 0.4.0\-test" "User Commands"`,
 		".SH NAME\nenv4ci \\- sync",
-		".SH COMMANDS\n", "\\fBpush\\fR [github|gitlab|vault]\n", "\\fBupdate\\fR\n",
+		".SH COMMANDS\n", "\\fBpush\\fR [github|gitlab|vault|jenkins]\n", "\\fBupdate\\fR\n",
 		".SH OPTIONS\n", `\fB\-c, \-\-config <file>\fR`, `\fB\-\-check\fR`,
 		".SH ENVIRONMENT\n", `\fBVAULT_TOKEN\fR`, ".SH EXIT STATUS\n", ".SH SEE ALSO\n",
 		"Flags: \\-c, \\-\\-dir.\n",

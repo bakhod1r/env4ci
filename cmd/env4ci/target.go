@@ -13,6 +13,7 @@ import (
 	"github.com/bakhod1r/env4ci/internal/infrastructure/gitinfo"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/github"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/gitlab"
+	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/jenkins"
 	"github.com/bakhod1r/env4ci/internal/infrastructure/provider/vault"
 )
 
@@ -29,7 +30,7 @@ func (g gitSource) Branch() (string, error)         { return gitinfo.CurrentBran
 
 // target is the fully resolved destination of a diff/push/pull.
 type target struct {
-	Provider    string // github | gitlab | vault
+	Provider    string // github | gitlab | vault | jenkins
 	Repo        string
 	BaseURL     string
 	Environment string // "" = repository level / scope "*"
@@ -48,6 +49,8 @@ func (t target) Describe() string {
 		env = `scope "*"`
 	case "vault":
 		env = "shared"
+	case "jenkins":
+		env = "folder " + t.Repo
 	}
 	if t.Environment != "" {
 		env = "environment " + t.Environment
@@ -78,10 +81,10 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 		t.Provider = remote.Provider
 		t.from = append(t.from, "provider from git remote")
 	default:
-		return t, errors.New("provider required (github, gitlab or vault); could not infer it from env4ci.yaml or git remote origin")
+		return t, errors.New("provider required (github, gitlab, vault or jenkins); could not infer it from env4ci.yaml or git remote origin")
 	}
-	if t.Provider != "github" && t.Provider != "gitlab" && t.Provider != "vault" {
-		return t, fmt.Errorf("unknown provider %q (want github, gitlab or vault)", t.Provider)
+	if t.Provider != "github" && t.Provider != "gitlab" && t.Provider != "vault" && t.Provider != "jenkins" {
+		return t, fmt.Errorf("unknown provider %q (want github, gitlab, vault or jenkins)", t.Provider)
 	}
 	remoteMatches := remoteErr == nil && remote.Provider == t.Provider
 
@@ -113,10 +116,20 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 		}
 		t.Vault = &vc
 		cfgRepo = vc.Path
+	case "jenkins":
+		j := config.Jenkins{}
+		if cfg.Targets.Jenkins != nil {
+			j = *cfg.Targets.Jenkins
+		}
+		cfgBase = first(j.URL, os.Getenv("JENKINS_URL"))
+		if cfgBase == "" {
+			return t, errors.New("jenkins: address unknown (targets.jenkins.url or JENKINS_URL)")
+		}
+		cfgRepo = first(j.Folder, systemStore)
 	}
 	t.Repo = first(o.repo, cfgRepo)
 	t.BaseURL = cfgBase
-	if t.Provider == "vault" {
+	if t.Provider == "vault" || t.Provider == "jenkins" {
 		remoteMatches = false
 	}
 	if t.Repo == "" && remoteMatches {
@@ -139,8 +152,11 @@ func resolveTarget(cfg config.Config, o opts, pos []string, git gitReader) (targ
 		t.from = append(t.from, from)
 	}
 
-	if t.Provider == "vault" {
+	switch t.Provider {
+	case "vault":
 		t.Repo = vaultPath(t.Repo, t.Environment)
+	case "jenkins":
+		t.Repo = jenkinsFolder(t.Repo, t.Environment)
 	}
 	return t, nil
 }
@@ -185,6 +201,29 @@ func vaultPath(tmpl, env string) string {
 	return strings.TrimRight(tmpl, "/") + "/" + env
 }
 
+// systemStore names the Jenkins system credentials store in target.Repo.
+const systemStore = "(system)"
+
+// jenkinsFolder fills {env}; with no environment the {env} segment is dropped.
+// Unlike Vault, a folder without {env} is used as is: Jenkins folders are
+// usually per team, and credentials in it serve every branch.
+func jenkinsFolder(tmpl, env string) string {
+	if tmpl == systemStore {
+		return tmpl
+	}
+	parts := strings.Split(strings.ReplaceAll(tmpl, "{env}", env), "/")
+	out := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return systemStore
+	}
+	return strings.Join(out, "/")
+}
+
 func newProvider(t target) (application.Provider, error) {
 	switch t.Provider {
 	case "github":
@@ -213,6 +252,15 @@ func newProvider(t target) (application.Provider, error) {
 			return nil, errors.New("vault: no token (set VAULT_TOKEN or run \"vault login\")")
 		}
 		return &vault.Client{Address: t.Vault.Address, Namespace: t.Vault.Namespace, Mount: t.Vault.Mount, Path: t.Repo, Token: token}, nil
+	case "jenkins":
+		c := &jenkins.Client{BaseURL: t.BaseURL, User: os.Getenv("JENKINS_USER"), Token: os.Getenv("JENKINS_TOKEN")}
+		if t.Repo != systemStore {
+			c.Folder = t.Repo
+		}
+		if c.User == "" || c.Token == "" {
+			return nil, errors.New("jenkins: JENKINS_USER and JENKINS_TOKEN (API token) must be set")
+		}
+		return c, nil
 	}
 	return nil, fmt.Errorf("unknown provider %q", t.Provider)
 }

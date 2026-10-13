@@ -29,7 +29,7 @@ var helpFlags = map[string]helpFlag{
 	"exit-code":   {"--exit-code", "exit 2 when there are changes (for CI drift checks)"},
 	"staged":      {"--staged", "only what the next commit adds"},
 	"check":       {"--check", "report a newer release without installing it"},
-	"targets":     {"--targets <list>", "github, gitlab, vault (comma-separated); no prompts"},
+	"targets":     {"--targets <list>", "github, gitlab, vault, jenkins (comma-separated); no prompts"},
 	"envs":        {"--envs <list>", "environments (comma-separated) instead of the ones CI deploys to"},
 }
 
@@ -40,7 +40,7 @@ type helpCmd struct {
 	flags               []string // keys of helpFlags
 }
 
-const providerArg = "[github|gitlab|vault]"
+const providerArg = "[github|gitlab|vault|jenkins]"
 
 var helpCmds = []helpCmd{
 	{"init", "", "create env4ci.yaml, the auth file and one .env file per environment",
@@ -148,7 +148,7 @@ func manPage() string {
 	fmt.Fprintf(&b, ".TH ENV4CI 1 \"\" \"env4ci %s\" \"User Commands\"\n", roff(version))
 	b.WriteString(".SH NAME\nenv4ci \\- sync environment variables and secrets across CI/CD platforms\n")
 	b.WriteString(".SH SYNOPSIS\n.B env4ci\n.I command\n[\\fIprovider\\fR] [\\fIflags\\fR]\n")
-	b.WriteString(".SH DESCRIPTION\n" + roff("env4ci keeps local .env files and the variables and secrets of GitHub Actions, GitLab CI/CD and HashiCorp Vault in sync. Values are never printed.") + "\n")
+	b.WriteString(".SH DESCRIPTION\n" + roff("env4ci keeps local .env files and the variables and secrets of GitHub Actions, GitLab CI/CD, HashiCorp Vault and Jenkins credentials in sync. Values are never printed.") + "\n")
 	b.WriteString(".SH COMMANDS\n")
 	for _, c := range helpCmds {
 		fmt.Fprintf(&b, ".TP\n%s\n%s.\n", strings.TrimSpace(`\fB`+roff(c.name)+`\fR `+roff(c.args)), roff(c.summary))

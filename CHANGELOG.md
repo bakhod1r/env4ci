@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Jenkins target (`targets.jenkins`, `url`, `folder: app/{env}`): keys are *Secret text* credentials in the system or a folder store; `JENKINS_USER` + `JENKINS_TOKEN`. `scan`, `gen` and `check` read `Jenkinsfile` credential IDs (`credentials('ID')`, `credentialsId:`, `sshagent([...])`).
+
+### Fixed
+- GitLab scan no longer reports variables a job's script sets itself (`X=...`, `export X=...`, `for X in`, `read X`); only keys that live in CI/CD settings remain.
+
 ### Changed
 - `push` and `rotate` no longer try SSH logins; only registry credentials are checked before writing. `env4ci verify` still tries SSH keys, without checking the server's host key. known_hosts support is gone: `*_KNOWN_HOSTS` is not read, `gen` does not add it, and `known_hosts:` under `checks.ssh` in env4ci.yaml is ignored.
 

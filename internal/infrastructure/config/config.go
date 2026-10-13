@@ -89,9 +89,10 @@ type Rule struct {
 }
 
 type Targets struct {
-	GitHub *GitHub `yaml:"github"`
-	GitLab *GitLab `yaml:"gitlab"`
-	Vault  *Vault  `yaml:"vault"`
+	GitHub  *GitHub  `yaml:"github"`
+	GitLab  *GitLab  `yaml:"gitlab"`
+	Vault   *Vault   `yaml:"vault"`
+	Jenkins *Jenkins `yaml:"jenkins"`
 }
 
 // Names lists configured targets in a fixed order.
@@ -106,6 +107,9 @@ func (t Targets) Names() []string {
 	if t.Vault != nil {
 		out = append(out, "vault")
 	}
+	if t.Jenkins != nil {
+		out = append(out, "jenkins")
+	}
 	return out
 }
 
@@ -116,6 +120,13 @@ type Vault struct {
 	Namespace string `yaml:"namespace"`
 	Mount     string `yaml:"mount"` // default "secret"
 	Path      string `yaml:"path"`  // e.g. myapp/{env}
+}
+
+// Jenkins stores every key as a "Secret text" credential. Folder may
+// contain {env}; empty means the system (global) credentials store.
+type Jenkins struct {
+	URL    string `yaml:"url"`    // else JENKINS_URL
+	Folder string `yaml:"folder"` // e.g. myapp/{env}
 }
 
 type GitHub struct {
@@ -239,4 +250,7 @@ targets:
   #   project: group/project
   #   environment: production   # omit for "*"
   #   protected: true
+  # jenkins:                    # JENKINS_USER + JENKINS_TOKEN (API token)
+  #   url: https://jenkins.example.com
+  #   folder: myapp/{env}       # omit for the system credentials store
 `
