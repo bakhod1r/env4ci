@@ -43,8 +43,7 @@ func branchFor(env string) string {
 }
 
 // envForBranch names the environment a branch deploys to: the inverse of
-// branchFor, else the branch name with anything but letters, digits, - and _
-// turned into "-".
+// branchFor, else the branch's own name (see branchSlug).
 func envForBranch(branch string) string {
 	switch branch {
 	case "main", "master":
@@ -52,13 +51,18 @@ func envForBranch(branch string) string {
 	case "develop", "dev":
 		return "staging"
 	}
-	env := strings.Trim(strings.Map(func(r rune) rune {
+	return first(branchSlug(branch), "production")
+}
+
+// branchSlug is a branch name usable as an environment name: lower case,
+// anything but letters, digits, - and _ turned into "-".
+func branchSlug(branch string) string {
+	return strings.Trim(strings.Map(func(r rune) rune {
 		if keyLike(string(r)) {
 			return r
 		}
 		return '-'
 	}, strings.ToLower(branch)), "-")
-	return first(env, "production")
 }
 
 // BranchOf is the branch that deploys to env: the checked-out branch the
@@ -276,33 +280,69 @@ func defaultsFromGit(git gitReader) initPlan {
 
 // ciEnvironment is an environment the CI files deploy to. Branch is the
 // single branch its jobs run on, "" when they run on several or on all.
+// FromBranch marks one CI does not name: it was derived from Branch.
 type ciEnvironment struct {
 	Name, Branch string
+	FromBranch   bool
 }
 
 // ciEnvironments lists the environments refs name, sorted. Shared scope and
-// names env4ci cannot use (an expression like ${{ inputs.target }}) are left out.
+// names env4ci cannot use (an expression like ${{ inputs.target }}) are left
+// out. When CI names none, the branches its jobs run on decide (see
+// environmentsFromBranches).
 func ciEnvironments(refs []domain.Reference) []ciEnvironment {
 	var envs []ciEnvironment
 	for _, g := range domain.GroupByEnvironment(refs) {
 		if !keyLike(g.Environment) {
 			continue
 		}
-		var branches []string
-		for _, r := range g.Refs {
-			for _, b := range r.Branches {
-				if b != domain.BranchAll && b != domain.BranchTags && !contains(branches, b) {
-					branches = append(branches, b)
-				}
-			}
-		}
 		e := ciEnvironment{Name: g.Environment}
-		if len(branches) == 1 {
+		if branches := plainBranches(g.Refs); len(branches) == 1 {
 			e.Branch = branches[0]
 		}
 		envs = append(envs, e)
 	}
+	if len(envs) == 0 {
+		envs = environmentsFromBranches(refs)
+	}
 	sort.Slice(envs, func(i, j int) bool { return envs[i].Name < envs[j].Name })
+	return envs
+}
+
+// plainBranches lists the exact branch names refs run on, in first-seen
+// order: no "every branch", tags, globs or regular expressions.
+func plainBranches(refs []domain.Reference) []string {
+	var out []string
+	for _, r := range refs {
+		for _, b := range r.Branches {
+			if b != domain.BranchAll && !strings.ContainsAny(b, `*?[]()^$\`) && !contains(out, b) {
+				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
+// environmentsFromBranches makes one environment per branch the CI jobs run
+// on ("on: push: branches: [dev, main]"), for CI files that name no
+// environment. A job deploying to ${{ github.ref_name }} means the
+// environment is the branch's own name; otherwise envForBranch decides
+// (main -> production, dev -> staging).
+func environmentsFromBranches(refs []domain.Reference) []ciEnvironment {
+	name := envForBranch
+	for _, r := range refs {
+		if strings.Contains(r.Environment, "github.ref_name") {
+			name = branchSlug
+		}
+	}
+	var envs []ciEnvironment
+	seen := map[string]bool{}
+	for _, b := range plainBranches(refs) {
+		if n := name(b); n != "" && !seen[n] {
+			seen[n] = true
+			envs = append(envs, ciEnvironment{Name: n, Branch: b, FromBranch: true})
+		}
+	}
 	return envs
 }
 

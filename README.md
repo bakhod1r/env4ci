@@ -33,6 +33,14 @@ A Homebrew or Scoop install is left alone: `update` prints the `brew upgrade` / 
 
 Help: `env4ci help`, `env4ci <command> --help`, and `man env4ci` (installed by `install.sh`; elsewhere `env4ci man > env4ci.1`).
 
+Tab completion of commands and each command's flags (`install.sh` installs the scripts; if your shell does not pick them up, load one yourself):
+
+```bash
+echo 'source <(env4ci completion zsh)' >> ~/.zshrc     # zsh, after compinit
+echo 'source <(env4ci completion bash)' >> ~/.bashrc   # bash
+env4ci completion fish > ~/.config/fish/completions/env4ci.fish
+```
+
 GitHub Actions:
 
 ```yaml

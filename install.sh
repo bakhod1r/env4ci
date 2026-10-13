@@ -103,6 +103,21 @@ if "$bindir/env4ci" man >"$tmp/env4ci.1" 2>/dev/null &&
 	cp "$tmp/env4ci.1" "$mandir/env4ci.1" 2>/dev/null; then
 	echo "Installed the manual to $mandir/env4ci.1 (man env4ci)"
 fi
+
+# Tab completion, where each shell looks under the same prefix.
+prefix=$(dirname "$bindir")
+for spec in \
+	"zsh:$prefix/share/zsh/site-functions/_env4ci" \
+	"bash:$prefix/share/bash-completion/completions/env4ci" \
+	"fish:$prefix/share/fish/vendor_completions.d/env4ci.fish"; do
+	shell=${spec%%:*}
+	dest=${spec#*:}
+	if "$bindir/env4ci" completion "$shell" >"$tmp/completion" 2>/dev/null &&
+		mkdir -p "$(dirname "$dest")" 2>/dev/null &&
+		cp "$tmp/completion" "$dest" 2>/dev/null; then
+		echo "Installed $shell completion to $dest"
+	fi
+done
 case ":$PATH:" in
 *":$bindir:"*) ;;
 *) echo "Note: $bindir is not on PATH; add it to your shell profile." ;;

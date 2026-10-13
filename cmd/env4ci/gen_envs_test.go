@@ -213,3 +213,79 @@ func TestInitEnvsFlagIsNotExtendedFromCI(t *testing.T) {
 	}
 	_ = dir
 }
+
+// branchJob reads one secret and names no environment (env "") or deploys to env.
+func branchWorkflow(branches, env string) string {
+	w := "on:\n  push:\n    branches: " + branches + "\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n"
+	if env != "" {
+		w += "    environment: " + env + "\n"
+	}
+	return w + "    steps:\n      - run: echo ${{ secrets.DB_PASSWORD }}\n"
+}
+
+func TestInitEnvironmentsFromCIBranchList(t *testing.T) {
+	for name, tc := range map[string]struct {
+		workflow     string
+		wantBranches map[string]string
+	}{
+		"branches: [dev, main], no environment": {
+			workflow:     branchWorkflow("[dev, main]", ""),
+			wantBranches: map[string]string{"dev": "staging", "main": "production"},
+		},
+		"two branches, one environment": {
+			workflow:     branchWorkflow("[main, master, qa]", ""),
+			wantBranches: map[string]string{"main": "production", "qa": "qa"},
+		},
+		"environment is the branch's name": {
+			workflow:     branchWorkflow(`[dev, main, "--"]`, "${{ github.ref_name }}"),
+			wantBranches: map[string]string{"dev": "dev", "main": "main"},
+		},
+		"patterns are not branches: the checked-out branch decides": {
+			workflow:     branchWorkflow(`["release/*"]`, ""),
+			wantBranches: map[string]string{"master": "production"},
+		},
+	} {
+		dir, cfgPath := ciProject(t, "", tc.workflow)
+		os.Remove(cfgPath)
+		var out bytes.Buffer
+		if err := cmdInitWizard(opts{config: cfgPath}, strings.NewReader("\n\n"), &out, fakeGit{remote: ghRemote, branch: "master"}, true); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		c, err := config.Load(cfgPath)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(c.Branches, tc.wantBranches) {
+			t.Errorf("%s: branches = %v, want %v\n%s", name, c.Branches, tc.wantBranches, out.String())
+		}
+		for _, env := range tc.wantBranches {
+			if b, err := os.ReadFile(filepath.Join(dir, ".github", env+".env")); err != nil || !strings.Contains(string(b), "DB_PASSWORD=") {
+				t.Errorf("%s: %s.env: %v\n%s", name, env, err, b)
+			}
+		}
+	}
+}
+
+func TestGenEnvironmentsFromCIBranchList(t *testing.T) {
+	// CI gained a branch: its environment is added under that branch.
+	cfg := "branches:\n  \"main\": production\nenvironments:\n  production: .github/production.env\ntargets:\n  github: { repo: a/b }\n"
+	dir, cfgPath := ciProject(t, cfg, branchWorkflow("[dev, main]", ""))
+	out := gen(t, dir, cfgPath)
+	c, _ := config.Load(cfgPath)
+	if want := map[string]string{"main": "production", "dev": "staging"}; !reflect.DeepEqual(c.Branches, want) {
+		t.Fatalf("branches = %v\n%s", c.Branches, out)
+	}
+	if c.Environments["staging"] != ".github/staging.env" {
+		t.Fatalf("environments = %v", c.Environments)
+	}
+
+	// The branch already deploys to an environment the user named: nothing is added.
+	cfg = "branches:\n  \"main\": live\nenvironments:\n  live: .github/live.env\ntargets:\n  github: { repo: a/b }\n"
+	dir, cfgPath = ciProject(t, cfg, branchWorkflow("[main]", ""))
+	if out := gen(t, dir, cfgPath); strings.Contains(out, "added environment") {
+		t.Fatal(out)
+	}
+	if text, _ := os.ReadFile(cfgPath); string(text) != cfg {
+		t.Fatalf("config changed:\n%s", text)
+	}
+}

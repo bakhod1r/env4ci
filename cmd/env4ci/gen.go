@@ -100,9 +100,15 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 	if len(files) == 0 {
 		files = map[string]string{"": first(cfg.Source, ".env")}
 	}
+	// dynamic: jobs whose environment is decided at run time
+	// (${{ github.ref_name }}); their keys can belong to any environment.
 	byEnv := map[string][]domain.Reference{}
+	var dynamic []domain.Reference
 	for _, g := range domain.GroupByEnvironment(refs) {
 		byEnv[g.Environment] = g.Refs
+		if g.Environment != "" && !keyLike(g.Environment) {
+			dynamic = append(dynamic, g.Refs...)
+		}
 	}
 
 	envs := make([]string, 0, len(files))
@@ -117,7 +123,7 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		}
 		// Shared keys are listed too: pushing them per environment is valid
 		// (environment values override repository ones).
-		keys := envFileKeys(env, append(append([]domain.Reference(nil), byEnv[env]...), byEnv[""]...))
+		keys := envFileKeys(env, append(append(append([]domain.Reference(nil), byEnv[env]...), dynamic...), byEnv[""]...))
 		if env != "" {
 			keys = withEnvironmentName(env, cl.Classify(environmentKey), keys)
 		}
@@ -151,6 +157,9 @@ func addCIEnvironments(cfg config.Config, configPath string, refs []domain.Refer
 	for _, e := range ciEnvironments(refs) {
 		if _, known := files[e.Name]; known {
 			continue
+		}
+		if _, mapped := domain.BranchMap(cfg.Branches).Environment(e.Branch); e.FromBranch && mapped {
+			continue // that branch already has an environment, under another name
 		}
 		file := newEnvFile(cfg.Environments, e.Name)
 		files[e.Name] = file

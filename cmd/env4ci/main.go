@@ -58,6 +58,7 @@ Usage:
   env4ci update                     replace this binary with the latest release (checksum verified);
                                     --check only reports
   env4ci man                        print the manual page (roff); install.sh installs it for "man env4ci"
+  env4ci completion bash|zsh|fish   print a tab-completion script (zsh: source <(env4ci completion zsh))
   env4ci help [command]             this text, or one command's help (also: env4ci <command> --help)
   env4ci version
 
@@ -205,6 +206,13 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	case "man":
 		fmt.Fprint(out, manPage())
 		return nil
+	case "completion":
+		if len(pos) != 1 {
+			return errors.New("completion: name one shell: " + strings.Join(completionShells, ", "))
+		}
+		script, err := completionScript(pos[0])
+		fmt.Fprint(out, script)
+		return err
 	case "update":
 		return cmdUpdate(ctx, o, out, newReleaseSource(), runtime.GOOS, runtime.GOARCH)
 	case "init":
