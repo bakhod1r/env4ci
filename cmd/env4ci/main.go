@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -281,6 +282,13 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	if len(pos) > 1 {
 		return fmt.Errorf("%s: at most one provider argument (github, gitlab or vault)", cmd)
 	}
+	if !o.all && o.env == "" && !o.shared && len(cfg.Environments) > 0 && terminal(in) {
+		answers := bufio.NewReader(in) // shared with the [y/N] that follows
+		if o.env, err = pickEnvironment(cfg, answers, out); err != nil {
+			return err
+		}
+		in = answers
+	}
 	if !o.all {
 		return syncOne(ctx, cmd, cfg, o, pos, in, out)
 	}
@@ -318,6 +326,37 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		return errDrift
 	}
 	return nil
+}
+
+// terminal reports an interactive stdin; tests replace it.
+var terminal = isTerminal
+
+// pickEnvironment asks which environment of env4ci.yaml to use, by number
+// or name. A single environment is used without asking.
+func pickEnvironment(cfg config.Config, in *bufio.Reader, out io.Writer) (string, error) {
+	envs := make([]string, 0, len(cfg.Environments))
+	for e := range cfg.Environments {
+		envs = append(envs, e)
+	}
+	sort.Strings(envs)
+	if len(envs) == 1 {
+		return envs[0], nil
+	}
+	ui := newPalette(out)
+	fmt.Fprintln(out, ui.Bold("Environments"))
+	for i, e := range envs {
+		fmt.Fprintf(out, "  %d) %-16s %s\n", i+1, e, ui.Dim(cfg.Environments[e]))
+	}
+	fmt.Fprintf(out, "Environment [1-%d or name]: ", len(envs))
+	line, _ := in.ReadString('\n')
+	answer := strings.TrimSpace(line)
+	if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(envs) {
+		return envs[n-1], nil
+	}
+	if _, ok := cfg.Environments[answer]; ok {
+		return answer, nil
+	}
+	return "", fmt.Errorf("no environment %q (want 1-%d or one of %s)", answer, len(envs), strings.Join(envs, ", "))
 }
 
 // syncOne runs diff/push/pull for one resolved target.

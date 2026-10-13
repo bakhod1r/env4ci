@@ -52,7 +52,7 @@ var helpCmds = []helpCmd{
 	{"validate", "", "parse and classify the local file, apply validate: rules",
 		"", []string{"config", "file", "env"}},
 	{"diff", providerArg, "show the plan (never prints values)",
-		"Provider, repository and environment default to git remote origin and the current branch mapped through branches: in env4ci.yaml.",
+		"Provider and repository default to git remote origin. Without -e, a terminal asks which environment of env4ci.yaml to use; in CI the current branch mapped through branches: decides.",
 		[]string{"config", "file", "env", "shared", "repo", "all", "allow-empty", "prune", "exit-code"}},
 	{"push", providerArg, "apply the plan after confirmation",
 		"SSH keys and registry tokens being written are tried first; nothing is written when a login fails.",
