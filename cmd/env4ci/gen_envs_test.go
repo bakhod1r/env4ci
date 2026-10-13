@@ -178,7 +178,7 @@ func TestGenConfigWriteFailures(t *testing.T) {
 		}
 		return os.OpenFile(name, flag, perm)
 	}
-	if err := cmdGen(loaded(cfgPath), opts{config: cfgPath, dir: dir}, &bytes.Buffer{}); err == nil {
+	if err := cmdGen(loaded(cfgPath), opts{config: cfgPath, dir: dir}, nil, &bytes.Buffer{}); err == nil {
 		t.Fatal("want open error")
 	}
 	// Opened, but the write fails.
@@ -188,14 +188,14 @@ func TestGenConfigWriteFailures(t *testing.T) {
 		}
 		return os.OpenFile(name, flag, perm)
 	}
-	if err := cmdGen(loaded(cfgPath), opts{config: cfgPath, dir: dir}, &bytes.Buffer{}); err == nil {
+	if err := cmdGen(loaded(cfgPath), opts{config: cfgPath, dir: dir}, nil, &bytes.Buffer{}); err == nil {
 		t.Fatal("want write error")
 	}
 	openFile = os.OpenFile
 	// Config vanished after it was loaded.
 	c := loaded(cfgPath)
 	os.Remove(cfgPath)
-	if err := cmdGen(c, opts{config: cfgPath, dir: dir}, &bytes.Buffer{}); err == nil {
+	if err := cmdGen(c, opts{config: cfgPath, dir: dir}, nil, &bytes.Buffer{}); err == nil {
 		t.Fatal("want read error")
 	}
 }
@@ -290,37 +290,158 @@ func TestGenEnvironmentsFromCIBranchList(t *testing.T) {
 	}
 }
 
-func TestGenWarnsAboutEnvironmentsCIDropped(t *testing.T) {
-	cfg := "branches:\n  \"main\": production\n  \"dev\": staging\n  \"live\": prod2\nenvironments:\n  production: .github/production.env\n  staging: .github/staging.env\n  prod2: .github/prod2.env\ntargets:\n  github: { repo: a/b }\n"
-	// dev was removed from the CI branch list; live deploys to prod2 under the config's name.
-	dir, cfgPath := ciProject(t, cfg, branchWorkflow("[main, live]", ""))
-	os.WriteFile(filepath.Join(dir, ".github", "staging.env"), []byte("DB_PASSWORD=keep\n"), 0o600)
-	out := gen(t, dir, cfgPath)
-	if !strings.Contains(out, "CI no longer deploys to environment staging (branch dev); if it is gone, remove it from") ||
-		!strings.Contains(out, "delete .github/staging.env") {
-		t.Fatal(out)
-	}
-	if strings.Contains(out, "environment production") || strings.Contains(out, "environment prod2 ") {
-		t.Fatalf("live environments flagged:\n%s", out)
-	}
-	// Nothing is deleted.
-	if b, _ := os.ReadFile(filepath.Join(dir, ".github", "staging.env")); !strings.HasPrefix(string(b), "DB_PASSWORD=keep\n") {
-		t.Fatalf("staging.env changed:\n%s", b)
-	}
-	c, _ := config.Load(cfgPath)
-	if c.Environments["staging"] == "" {
-		t.Fatal("staging removed from config")
-	}
+// droppedProject: env4ci.yaml knows production (main), staging (dev) and
+// prod2 (live); CI now runs on main and live only, so staging is gone.
+func droppedProject(t *testing.T) (dir, cfgPath string) {
+	t.Helper()
+	cfg := "# mine\nbranches:\n  \"main\": production\n  \"dev\": staging # old\n  \"live\": prod2\nenvironments:\n  production: .github/production.env\n  staging: .github/staging.env\n  prod2: .github/prod2.env\ntargets:\n  github: { repo: a/b }\n"
+	dir, cfgPath = ciProject(t, cfg, branchWorkflow("[main, live]", ""))
+	os.WriteFile(filepath.Join(dir, ".github", "staging.env"), []byte("ENVIRONMENT=staging\nDB_PASSWORD=keep\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("bin\n/.github/staging.env\n"), 0o644)
+	return dir, cfgPath
+}
 
-	// An environment with no branch, and CI naming no environment: no warning.
-	dir, cfgPath = ciProject(t, "environments:\n  production: .env.production\n  old: .env.old\ntargets:\n  github: { repo: a/b }\n",
-		"on: push\njobs:\n"+ciJob("a", "production"))
-	if out := gen(t, dir, cfgPath); !strings.Contains(out, "environment old; if it is gone") {
-		t.Fatal(out)
+func genWith(t *testing.T, cfgPath, dir string, o opts, in string) string {
+	t.Helper()
+	c, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	dir, cfgPath = ciProject(t, "environments:\n  production: .env.production\ntargets:\n  github: { repo: a/b }\n",
+	o.config, o.dir = cfgPath, dir
+	var out bytes.Buffer
+	if err := cmdGen(c, o, strings.NewReader(in), &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	return out.String()
+}
+
+func TestGenRemovesEnvironmentsCIDropped(t *testing.T) {
+	for name, o := range map[string]opts{"-y": {yes: true}, "terminal y": {interactive: true}} {
+		dir, cfgPath := droppedProject(t)
+		out := genWith(t, cfgPath, dir, o, "y\n")
+		if !strings.Contains(out, "CI no longer deploys to environment staging (branch dev)") || !strings.Contains(out, "removed environment staging") {
+			t.Fatalf("%s:\n%s", name, out)
+		}
+		if o.interactive && !strings.Contains(out, "delete .github/staging.env, which has 1 filled values? [y/N]") {
+			t.Errorf("%s: prompt:\n%s", name, out)
+		}
+		text, _ := os.ReadFile(cfgPath)
+		want := "# mine\nbranches:\n  \"main\": production\n  \"live\": prod2\nenvironments:\n  production: .github/production.env\n  prod2: .github/prod2.env\ntargets:\n  github: { repo: a/b }\n"
+		if string(text) != want {
+			t.Errorf("%s: config:\n%s", name, text)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".github", "staging.env")); err == nil {
+			t.Errorf("%s: staging.env still there", name)
+		}
+		if gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore")); strings.Contains(string(gi), "staging") || !strings.HasPrefix(string(gi), "bin\n") {
+			t.Errorf("%s: .gitignore:\n%s", name, gi)
+		}
+	}
+}
+
+func TestGenKeepsDroppedEnvironmentWithoutYes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		o  opts
+		in string
+	}{"not a terminal": {opts{}, ""}, "terminal n": {opts{interactive: true}, "n\n"}} {
+		dir, cfgPath := droppedProject(t)
+		before, _ := os.ReadFile(cfgPath)
+		out := genWith(t, cfgPath, dir, tc.o, tc.in)
+		if !strings.Contains(out, "kept; to remove it run env4ci gen -y") {
+			t.Errorf("%s:\n%s", name, out)
+		}
+		if after, _ := os.ReadFile(cfgPath); !bytes.Equal(before, after) {
+			t.Errorf("%s: config changed", name)
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, ".github", "staging.env")); !strings.Contains(string(b), "DB_PASSWORD=keep") {
+			t.Errorf("%s: staging.env changed:\n%s", name, b)
+		}
+	}
+	// gen alone (nil stdin), and CI naming no environment: nothing to compare.
+	dir, cfgPath := ciProject(t, "environments:\n  production: .env.production\ntargets:\n  github: { repo: a/b }\n",
 		"on: push\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo ${{ secrets.A }}\n")
 	if out := gen(t, dir, cfgPath); strings.Contains(out, "no longer") {
 		t.Fatal(out)
+	}
+	c, _ := config.Load(cfgPath)
+	if err := cmdGen(c, opts{config: cfgPath, dir: dir, yes: true}, nil, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGenRemoveEdgeCases(t *testing.T) {
+	// No branches: and no file on disk, flow-style config left to the user.
+	dir, cfgPath := ciProject(t, "environments:\n  production: .env.production\n  old: .env.old\ntargets:\n  github: { repo: a/b }\n", "on: push\njobs:\n"+ciJob("a", "production"))
+	if out := genWith(t, cfgPath, dir, opts{yes: true}, ""); !strings.Contains(out, "removed environment old") {
+		t.Fatal(out)
+	}
+	if c, _ := config.Load(cfgPath); c.Environments["old"] != "" {
+		t.Fatal("old still in config")
+	}
+	dir, cfgPath = ciProject(t, "environments: { production: .env.production, old: .env.old }\ntargets:\n  github: { repo: a/b }\n", "on: push\njobs:\n"+ciJob("a", "production"))
+	if out := genWith(t, cfgPath, dir, opts{yes: true}, ""); !strings.Contains(out, "remove old from it by hand") {
+		t.Fatal(out)
+	}
+
+	defer func() { openFile = os.OpenFile }()
+	fail := func(setup func(dir, cfgPath string)) {
+		t.Helper()
+		dir, cfgPath := droppedProject(t)
+		c, _ := config.Load(cfgPath)
+		setup(dir, cfgPath)
+		if err := cmdGen(c, opts{config: cfgPath, dir: dir, yes: true}, nil, &bytes.Buffer{}); err == nil {
+			t.Fatal("want error")
+		}
+		openFile = os.OpenFile
+	}
+	failOpen := func(target string) func(string, string) {
+		return func(dir, cfgPath string) {
+			path := filepath.Join(dir, target)
+			if target == "" {
+				path = cfgPath
+			}
+			openFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+				if name == path && flag&os.O_TRUNC != 0 {
+					return nil, os.ErrPermission
+				}
+				return os.OpenFile(name, flag, perm)
+			}
+		}
+	}
+	fail(failOpen(""))           // config cannot be rewritten
+	fail(failOpen(".gitignore")) // .gitignore cannot be rewritten
+	fail(func(dir, _ string) {   // .gitignore unreadable
+		os.Remove(filepath.Join(dir, ".gitignore"))
+		os.Mkdir(filepath.Join(dir, ".gitignore"), 0o755)
+	})
+	fail(func(dir, _ string) { // env file is a non-empty folder
+		f := filepath.Join(dir, ".github", "staging.env")
+		os.Remove(f)
+		os.MkdirAll(filepath.Join(f, "x"), 0o755)
+	})
+	fail(func(_, cfgPath string) { os.Remove(cfgPath) }) // config vanished
+
+	fail(func(_, cfgPath string) { // config opens, but the write fails
+		openFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+			if name == cfgPath {
+				return os.Open(name)
+			}
+			return os.OpenFile(name, flag, perm)
+		}
+	})
+
+	// CRLF config, .gitignore without the line: both kept as they are.
+	dir, cfgPath = ciProject(t, "environments:\r\n  production: .env.production\r\n  old: .env.old\r\ntargets:\r\n  github: { repo: a/b }\r\n", "on: push\njobs:\n"+ciJob("a", "production"))
+	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("bin\n"), 0o644)
+	genWith(t, cfgPath, dir, opts{yes: true}, "")
+	if text, _ := os.ReadFile(cfgPath); string(text) != "environments:\r\n  production: .env.production\r\ntargets:\r\n  github: { repo: a/b }\r\n" {
+		t.Fatalf("%q", text)
+	}
+
+	if got := filledValues(filepath.Join(t.TempDir(), "missing")); got != 0 {
+		t.Fatal(got)
+	}
+	if err := gitignoreRemove(filepath.Join(t.TempDir(), "none"), "x"); err != nil {
+		t.Fatal(err)
 	}
 }

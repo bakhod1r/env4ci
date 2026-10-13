@@ -127,6 +127,7 @@ type opts struct {
 	shared, noVerify, all        bool
 	allowEmpty, staged, generate bool
 	check                        bool
+	interactive                  bool // gen: stdin is a terminal, questions can be asked
 	fixedEnvs                    bool // gen: init chose the environments; do not add CI's
 	targets, envs                string
 }
@@ -233,7 +234,8 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	}
 	switch cmd {
 	case "gen":
-		return cmdGen(cfg, o, out)
+		o.interactive = isTerminal(in)
+		return cmdGen(cfg, o, in, out)
 	case "makefile":
 		return writeMakefile(filepath.Join(filepath.Dir(o.config), "Makefile"), out)
 	case "validate":

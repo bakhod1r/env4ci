@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -54,7 +55,7 @@ func loadAuthFile(cfg config.Config, out io.Writer) error {
 // cmdGen creates (or completes) the auth file and one .env file per
 // environment from env4ci.yaml, pre-filling keys the CI files use.
 // Existing values are never changed; only missing keys are appended.
-func cmdGen(cfg config.Config, o opts, out io.Writer) error {
+func cmdGen(cfg config.Config, o opts, in io.Reader, out io.Writer) error {
 	targets := cfg.Targets.Names()
 	if len(targets) == 0 {
 		return errors.New("gen: no targets in env4ci.yaml (run env4ci init)")
@@ -74,7 +75,9 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		if cfg, err = addCIEnvironments(cfg, o.config, refs, out, ui); err != nil {
 			return err
 		}
-		warnGoneEnvironments(cfg, o.config, refs, out, ui)
+		if cfg, err = removeGoneEnvironments(cfg, o, in, refs, out, ui); err != nil {
+			return err
+		}
 	}
 
 	// 1. env4ci's own settings.
@@ -208,13 +211,15 @@ func addCIEnvironments(cfg config.Config, configPath string, refs []domain.Refer
 	return cfg, nil
 }
 
-// warnGoneEnvironments names every environment of env4ci.yaml the CI files
-// no longer deploy to (a removed environment: or branch). Nothing is
-// deleted: the env file may hold the only copy of its values.
-func warnGoneEnvironments(cfg config.Config, configPath string, refs []domain.Reference, out io.Writer, ui palette) {
+// removeGoneEnvironments handles every environment of env4ci.yaml the CI
+// files no longer deploy to (a removed environment: or branch). With -y, or
+// a "y" on a terminal, its lines leave env4ci.yaml, its env file is deleted
+// and its .gitignore line goes; otherwise it is only named. cfg is returned
+// without the removed environments.
+func removeGoneEnvironments(cfg config.Config, o opts, in io.Reader, refs []domain.Reference, out io.Writer, ui palette) (config.Config, error) {
 	ci := ciEnvironments(refs)
 	if len(ci) == 0 {
-		return // CI names no environment at all: nothing to compare
+		return cfg, nil // CI names no environment at all: nothing to compare
 	}
 	live := map[string]bool{}
 	for _, e := range ci {
@@ -228,10 +233,13 @@ func warnGoneEnvironments(cfg config.Config, configPath string, refs []domain.Re
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	base := filepath.Dir(o.config)
+	answers := bufio.NewReader(orEmpty(in))
 	for _, n := range names {
 		if live[n] {
 			continue
 		}
+		file := filepath.ToSlash(cfg.Environments[n])
 		var branches []string
 		for b, e := range cfg.Branches {
 			if e == n {
@@ -239,13 +247,159 @@ func warnGoneEnvironments(cfg config.Config, configPath string, refs []domain.Re
 			}
 		}
 		sort.Strings(branches)
-		via := ""
+		what := "environment " + n
 		if len(branches) > 0 {
-			via = " (branch " + strings.Join(branches, ", ") + ")"
+			what += " (branch " + strings.Join(branches, ", ") + ")"
 		}
-		fmt.Fprintf(out, "%s CI no longer deploys to environment %s%s; if it is gone, remove it from %s and delete %s\n",
-			ui.Yellow("!"), n, via, filepath.ToSlash(configPath), filepath.ToSlash(cfg.Environments[n]))
+		if filled := filledValues(filepath.Join(base, file)); filled > 0 {
+			file += fmt.Sprintf(", which has %d filled values", filled)
+		}
+		fmt.Fprintf(out, "%s CI no longer deploys to %s\n", ui.Yellow("!"), what)
+		remove := o.yes
+		if !remove && o.interactive {
+			remove = confirm(answers, out, fmt.Sprintf("  remove it from %s and delete %s? [y/N] ", filepath.ToSlash(o.config), file))
+		}
+		if !remove {
+			fmt.Fprintf(out, "  kept; to remove it run %s, or answer y on a terminal\n", ui.Bold("env4ci gen -y"))
+			continue
+		}
+		if err := removeEnvironment(cfg, o.config, n, out, ui); err != nil {
+			return cfg, err
+		}
+		cfg.Environments, cfg.Branches = copyMap(cfg.Environments), copyMap(cfg.Branches)
+		delete(cfg.Environments, n)
+		for _, b := range branches {
+			delete(cfg.Branches, b)
+		}
 	}
+	return cfg, nil
+}
+
+func orEmpty(r io.Reader) io.Reader {
+	if r == nil {
+		return strings.NewReader("")
+	}
+	return r
+}
+
+// filledValues counts the keys of an env file that have a value, leaving
+// out the generated ENVIRONMENT name. 0 when the file cannot be read.
+func filledValues(path string) int {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	entries, _ := dotenv.Parse(f)
+	n := 0
+	for _, e := range entries {
+		if e.Value != "" && e.Key != environmentKey {
+			n++
+		}
+	}
+	return n
+}
+
+// removeEnvironment drops env's lines from env4ci.yaml (environments: and
+// the branches: that map to it), its .gitignore line, and its env file.
+func removeEnvironment(cfg config.Config, configPath, env string, out io.Writer, ui palette) error {
+	b, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	text, ok := removeYAMLEntries(string(b), "environments", func(k, _ string) bool { return k == env })
+	if ok && strings.Contains(text, "\nbranches:") || strings.HasPrefix(text, "branches:") {
+		text, ok = removeYAMLEntries(text, "branches", func(_, v string) bool { return v == env })
+	}
+	if !ok {
+		fmt.Fprintf(out, "  %s is not in plain block style: remove %s from it by hand\n", filepath.ToSlash(configPath), env)
+		return nil
+	}
+	f, err := openFile(configPath, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+	if err := writeClose(f, []byte(text)); err != nil {
+		return err
+	}
+	base := filepath.Dir(configPath)
+	file := filepath.ToSlash(filepath.Clean(cfg.Environments[env]))
+	entry := file
+	if strings.Contains(file, "/") {
+		entry = "/" + file
+	}
+	if err := gitignoreRemove(filepath.Join(base, ".gitignore"), entry); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(base, filepath.FromSlash(file))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fmt.Fprintf(out, "%s removed environment %s: %s line, %s, .gitignore entry\n", ui.Red("-"), env, filepath.ToSlash(configPath), file)
+	return nil
+}
+
+// gitignoreRemove drops the line entry from a .gitignore; a missing file or
+// line is fine.
+func gitignoreRemove(path, entry string) error {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.SplitAfter(string(b), "\n")
+	kept := lines[:0]
+	for _, l := range lines {
+		if strings.TrimSpace(l) != entry {
+			kept = append(kept, l)
+		}
+	}
+	if len(kept) == len(lines) {
+		return nil
+	}
+	f, err := openFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return err
+	}
+	return writeClose(f, []byte(strings.Join(kept, "")))
+}
+
+// removeYAMLEntries deletes the entries of the top-level block mapping key
+// for which drop(key, value) is true. ok is false when text has no such
+// block (the key is missing or written in flow style).
+func removeYAMLEntries(text, key string, drop func(k, v string) bool) (string, bool) {
+	eol := "\n"
+	if strings.Contains(text, "\r\n") {
+		eol = "\r\n"
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	head := regexp.MustCompile(`^` + regexp.QuoteMeta(key) + `:\s*(#.*)?$`)
+	for i, l := range lines {
+		if !head.MatchString(l) {
+			continue
+		}
+		kept := append([]string(nil), lines[:i+1]...)
+		j := i + 1
+		for ; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if t != "" && !strings.HasPrefix(t, "#") && lines[j][0] != ' ' {
+				break
+			}
+			if c := strings.Index(t, ":"); c > 0 && !strings.HasPrefix(t, "#") {
+				v := strings.TrimSpace(t[c+1:])
+				if h := strings.Index(v, " #"); h >= 0 {
+					v = v[:h]
+				}
+				if drop(strings.Trim(t[:c], `"' `), strings.Trim(v, `"' `)) {
+					continue
+				}
+			}
+			kept = append(kept, lines[j])
+		}
+		return strings.Join(append(kept, lines[j:]...), eol), true
+	}
+	return text, false
 }
 
 func copyMap(m map[string]string) map[string]string {

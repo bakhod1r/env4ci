@@ -455,7 +455,7 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 	}
 
 	o.fixedEnvs = true
-	if err := cmdGen(p.config(), o, out); err != nil {
+	if err := cmdGen(p.config(), o, nil, out); err != nil {
 		return err
 	}
 	if err := writeMakefile(filepath.Join(filepath.Dir(o.config), "Makefile"), out); err != nil {
