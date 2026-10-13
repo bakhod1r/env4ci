@@ -387,6 +387,11 @@ func TestGitHubPlanColorsPrunePull(t *testing.T) {
 	if s := mustRun(t, "push", "-f", env, "-c", cfg, "--prune", "-y", "--no-verify"); !strings.Contains(s, "0 written, 2 deleted") {
 		t.Fatal(s)
 	}
+	// An empty local value keeps the remote secret: no write, no prune delete.
+	os.WriteFile(env, []byte("S_TOKEN=\nAPP_PORT=1\n"), 0o600)
+	if s := mustRun(t, "push", "-f", env, "-c", cfg, "--prune", "-y", "--no-verify"); !strings.Contains(s, "0 written, 1 deleted") || !strings.Contains(s, "skipped 1 empty: S_TOKEN") {
+		t.Fatal(s)
+	}
 
 	// pull: default file name, hidden secrets reported, gitignored.
 	wd, _ := os.Getwd()

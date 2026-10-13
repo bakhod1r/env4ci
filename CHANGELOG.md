@@ -6,6 +6,7 @@
 - Jenkins target (`targets.jenkins`, `url`, `folder: app/{env}`): keys are *Secret text* credentials in the system or a folder store; `JENKINS_USER` + `JENKINS_TOKEN`. `scan`, `gen` and `check` read `Jenkinsfile` credential IDs (`credentials('ID')`, `credentialsId:`, `sshagent([...])`).
 
 ### Fixed
+- `push --prune` no longer deletes a remote key whose local value is empty; an empty value always means "leave the remote as is".
 - GitLab scan no longer reports variables a job's script sets itself (`X=...`, `export X=...`, `for X in`, `read X`); only keys that live in CI/CD settings remain.
 
 ### Changed

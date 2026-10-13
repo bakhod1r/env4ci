@@ -265,7 +265,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 		if err != nil {
 			return err
 		}
-		local = dropEmpty(local, o, out)
+		local, _ = dropEmpty(local, o, out)
 		checks := credentialChecks(cfg, local, true)
 		if len(checks) == 0 {
 			fmt.Fprintln(out, "No SSH keys or registry credentials found.")
@@ -389,7 +389,7 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 	if err := checkValues(cfg, local, t.Environment, out); err != nil {
 		return err
 	}
-	local = dropEmpty(local, o, out)
+	local, empty := dropEmpty(local, o, out)
 	remote, err := p.List(ctx)
 	if err != nil {
 		return fmt.Errorf("%s: %w", p.Name(), err)
@@ -398,6 +398,7 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 	if err != nil {
 		return err
 	}
+	plan = plan.Leave(empty)
 	printPlan(out, p.Name(), plan, o.prune)
 	if cmd == "diff" || cmd == "plan" {
 		if o.exitCode && (plan.HasWrites() || (o.prune && hasRemoteOnly(plan))) {
@@ -580,16 +581,16 @@ func cmdInit(o opts, out io.Writer) error {
 
 // dropEmpty leaves out keys with empty values (unfilled placeholders from
 // env4ci gen), so they never overwrite real remote values, unless
-// --allow-empty is set.
-func dropEmpty(vars []domain.Variable, o opts, out io.Writer) []domain.Variable {
+// --allow-empty is set. The skipped keys are returned so --prune leaves them too.
+func dropEmpty(vars []domain.Variable, o opts, out io.Writer) (filled []domain.Variable, empty []string) {
 	if o.allowEmpty {
-		return vars
+		return vars, nil
 	}
-	filled, empty := domain.SplitEmpty(vars)
+	filled, empty = domain.SplitEmpty(vars)
 	if len(empty) > 0 {
 		fmt.Fprintf(out, "%s skipped %d empty: %s (fill them, or --allow-empty)\n", newPalette(out).Yellow("!"), len(empty), strings.Join(empty, ", "))
 	}
-	return filled
+	return filled, empty
 }
 
 func loadLocal(cfg config.Config, o opts) ([]domain.Variable, error) {

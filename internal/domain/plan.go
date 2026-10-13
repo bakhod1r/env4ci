@@ -87,3 +87,20 @@ func (p Plan) WriteKeys() []string {
 	}
 	return out
 }
+
+// Leave marks keys as untouched: a key left empty locally keeps its remote
+// value, and --prune never deletes it.
+func (p Plan) Leave(keys []string) Plan {
+	skip := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		skip[k] = true
+	}
+	out := Plan{Changes: make([]Change, len(p.Changes))}
+	for i, c := range p.Changes {
+		if skip[c.Key] && c.Action == ActionRemoteOnly {
+			c.Action = ActionNoop
+		}
+		out.Changes[i] = c
+	}
+	return out
+}

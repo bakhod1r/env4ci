@@ -89,3 +89,16 @@ func TestValidKey(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanLeave(t *testing.T) {
+	p := ComputePlan([]Variable{{Key: "A", Value: "1", Kind: KindVariable}},
+		[]Remote{{Key: "S", Kind: KindSecret}, {Key: "GONE", Kind: KindSecret}})
+	p = p.Leave([]string{"S"})
+	got := map[string]Action{}
+	for _, c := range p.Changes {
+		got[c.Key] = c.Action
+	}
+	if got["S"] != ActionNoop || got["GONE"] != ActionRemoteOnly || got["A"] != ActionCreate {
+		t.Fatalf("%+v", p.Changes)
+	}
+}
