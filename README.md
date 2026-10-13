@@ -31,6 +31,8 @@ env4ci update --check   # only say whether a newer release exists
 
 A Homebrew or Scoop install is left alone: `update` prints the `brew upgrade` / `scoop update` command instead.
 
+Help: `env4ci help`, `env4ci <command> --help`, and `man env4ci` (installed by `install.sh`; elsewhere `env4ci man > env4ci.1`).
+
 GitHub Actions:
 
 ```yaml

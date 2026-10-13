@@ -57,6 +57,8 @@ Usage:
   env4ci hook                       install a git pre-commit hook running "env4ci leaks --staged"
   env4ci update                     replace this binary with the latest release (checksum verified);
                                     --check only reports
+  env4ci man                        print the manual page (roff); install.sh installs it for "man env4ci"
+  env4ci help [command]             this text, or one command's help (also: env4ci <command> --help)
   env4ci version
 
 Flags (after the subcommand):
@@ -124,6 +126,7 @@ type opts struct {
 	shared, noVerify, all        bool
 	allowEmpty, staged, generate bool
 	check                        bool
+	fixedEnvs                    bool // gen: init chose the environments; do not add CI's
 	targets, envs                string
 }
 
@@ -178,11 +181,19 @@ func parseFlags(args []string) (opts, []string, error) {
 }
 
 func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || (args[0] == "help" && len(args) == 1) {
 		fmt.Fprint(out, usage)
 		return nil
 	}
 	cmd := args[0]
+	if cmd == "help" || wantsHelp(args[1:]) {
+		if cmd == "help" {
+			cmd = args[1] // "env4ci help" alone printed the usage above
+		}
+		text, err := commandHelp(cmd)
+		fmt.Fprint(out, text)
+		return err
+	}
 	o, pos, err := parseFlags(args[1:])
 	if err != nil {
 		return err
@@ -190,6 +201,9 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	switch cmd {
 	case "version":
 		fmt.Fprintln(out, "env4ci", version)
+		return nil
+	case "man":
+		fmt.Fprint(out, manPage())
 		return nil
 	case "update":
 		return cmdUpdate(ctx, o, out, newReleaseSource(), runtime.GOOS, runtime.GOARCH)

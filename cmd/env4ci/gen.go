@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -61,6 +62,20 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 	base := filepath.Dir(o.config)
 	ui := newPalette(out)
 
+	cl, err := cfg.Classifier()
+	if err != nil {
+		return err
+	}
+	refs, err := ciscan.Scan(first(o.dir, base), cl)
+	if err != nil {
+		return err
+	}
+	if len(cfg.Environments) > 0 && !o.fixedEnvs {
+		if cfg, err = addCIEnvironments(cfg, o.config, refs, out, ui); err != nil {
+			return err
+		}
+	}
+
 	// 1. env4ci's own settings.
 	var authKeys []dotenv.ExampleKey
 	for _, k := range application.AuthKeys(targets) {
@@ -84,14 +99,6 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 	files := cfg.Environments
 	if len(files) == 0 {
 		files = map[string]string{"": first(cfg.Source, ".env")}
-	}
-	cl, err := cfg.Classifier()
-	if err != nil {
-		return err
-	}
-	refs, err := ciscan.Scan(first(o.dir, base), cl)
-	if err != nil {
-		return err
 	}
 	byEnv := map[string][]domain.Reference{}
 	for _, g := range domain.GroupByEnvironment(refs) {
@@ -132,6 +139,131 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		fmt.Fprintf(out, "%s %s is gitignored; it holds no secrets and should be committed (check .gitignore)\n", ui.Yellow("!"), o.config)
 	}
 	return nil
+}
+
+// addCIEnvironments adds to env4ci.yaml every environment the CI files
+// deploy to that it lacks, and returns cfg with them. Only the new lines are
+// inserted: comments and everything else in the file stay as they are. A
+// config whose environments: or branches: is not a plain block is left alone.
+func addCIEnvironments(cfg config.Config, configPath string, refs []domain.Reference, out io.Writer, ui palette) (config.Config, error) {
+	files, branches := copyMap(cfg.Environments), copyMap(cfg.Branches)
+	var names, notes, envLines, branchLines []string
+	for _, e := range ciEnvironments(refs) {
+		if _, known := files[e.Name]; known {
+			continue
+		}
+		file := newEnvFile(cfg.Environments, e.Name)
+		files[e.Name] = file
+		envLines = append(envLines, e.Name+": "+file)
+		note := "file " + file
+		if len(cfg.Branches) > 0 {
+			for _, b := range []string{first(e.Branch, branchFor(e.Name)), e.Name} {
+				if _, taken := branches[b]; !taken {
+					branches[b] = e.Name
+					branchLines = append(branchLines, fmt.Sprintf("%q: %s", b, e.Name))
+					note = "branch " + b + ", " + note
+					break
+				}
+			}
+		}
+		names = append(names, e.Name)
+		notes = append(notes, note)
+	}
+	if len(names) == 0 {
+		return cfg, nil
+	}
+	b, err := os.ReadFile(configPath)
+	if err != nil {
+		return cfg, err
+	}
+	text, ok := addYAMLEntries(string(b), "environments", envLines)
+	if ok && len(branchLines) > 0 {
+		text, ok = addYAMLEntries(text, "branches", branchLines)
+	}
+	if !ok {
+		fmt.Fprintf(out, "%s CI deploys to %s, which %s lacks; add under environments: by hand\n", ui.Yellow("!"), strings.Join(names, ", "), configPath)
+		return cfg, nil
+	}
+	f, err := openFile(configPath, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		return cfg, err
+	}
+	if err := writeClose(f, []byte(text)); err != nil {
+		return cfg, err
+	}
+	for i, n := range names {
+		fmt.Fprintf(out, "%s added environment %s to %s (%s)\n", ui.Green("+"), n, filepath.ToSlash(configPath), notes[i])
+	}
+	cfg.Environments, cfg.Branches = files, branches
+	return cfg, nil
+}
+
+func copyMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// newEnvFile names env's file the way the config names the others:
+// production: .github/production.env gives .github/staging.env. When no
+// file carries its environment's name, the folder of the first one is used.
+func newEnvFile(existing map[string]string, env string) string {
+	names := make([]string, 0, len(existing))
+	for n := range existing {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		f := filepath.ToSlash(existing[n])
+		if strings.Contains(path.Base(f), n) {
+			return path.Join(path.Dir(f), strings.Replace(path.Base(f), n, env, 1))
+		}
+	}
+	dir := path.Dir(filepath.ToSlash(existing[names[0]]))
+	if dir == "." {
+		dir = ""
+	}
+	return envFileFor(dir, env)
+}
+
+// addYAMLEntries inserts entries at the end of the top-level block mapping
+// key, with the indentation its entries use. ok is false when text has no
+// such block (the key is missing or written in flow style).
+func addYAMLEntries(text, key string, entries []string) (string, bool) {
+	eol := "\n"
+	if strings.Contains(text, "\r\n") {
+		eol = "\r\n"
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	head := regexp.MustCompile(`^` + regexp.QuoteMeta(key) + `:\s*(#.*)?$`)
+	for i, l := range lines {
+		if !head.MatchString(l) {
+			continue
+		}
+		last, indent := i, "  "
+		for j := i + 1; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if t == "" || strings.HasPrefix(t, "#") {
+				continue
+			}
+			if lines[j][0] != ' ' {
+				break
+			}
+			if last == i {
+				indent = lines[j][:len(lines[j])-len(strings.TrimLeft(lines[j], " "))]
+			}
+			last = j
+		}
+		added := make([]string, 0, len(entries))
+		for _, e := range entries {
+			added = append(added, indent+e)
+		}
+		lines = append(lines[:last+1], append(added, lines[last+1:]...)...)
+		return strings.Join(lines, eol), true
+	}
+	return text, false
 }
 
 // environmentKey is the first key of every environment file: its value is

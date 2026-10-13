@@ -7,6 +7,7 @@
 #   ENV4CI_VERSION  release to install, e.g. v0.1.0 (default: latest)
 #   BINDIR          install directory (default: /usr/local/bin if writable,
 #                   else ~/.local/bin)
+#   MANDIR          manual page directory (default: <BINDIR>/../share/man/man1)
 set -eu
 
 REPO="bakhod1r/env4ci"
@@ -94,6 +95,14 @@ install -m 0755 "$tmp/env4ci" "$bindir/env4ci" 2>/dev/null || {
 } || die "cannot write to $bindir (set BINDIR or run with sudo)"
 
 echo "Installed $("$bindir/env4ci" version) to $bindir/env4ci"
+
+# Manual page, next to the binary's prefix (releases before "env4ci man" have none).
+mandir=${MANDIR:-$(dirname "$bindir")/share/man/man1}
+if "$bindir/env4ci" man >"$tmp/env4ci.1" 2>/dev/null &&
+	mkdir -p "$mandir" 2>/dev/null &&
+	cp "$tmp/env4ci.1" "$mandir/env4ci.1" 2>/dev/null; then
+	echo "Installed the manual to $mandir/env4ci.1 (man env4ci)"
+fi
 case ":$PATH:" in
 *":$bindir:"*) ;;
 *) echo "Note: $bindir is not on PATH; add it to your shell profile." ;;

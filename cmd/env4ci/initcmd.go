@@ -274,6 +274,38 @@ func defaultsFromGit(git gitReader) initPlan {
 	return p
 }
 
+// ciEnvironment is an environment the CI files deploy to. Branch is the
+// single branch its jobs run on, "" when they run on several or on all.
+type ciEnvironment struct {
+	Name, Branch string
+}
+
+// ciEnvironments lists the environments refs name, sorted. Shared scope and
+// names env4ci cannot use (an expression like ${{ inputs.target }}) are left out.
+func ciEnvironments(refs []domain.Reference) []ciEnvironment {
+	var envs []ciEnvironment
+	for _, g := range domain.GroupByEnvironment(refs) {
+		if !keyLike(g.Environment) {
+			continue
+		}
+		var branches []string
+		for _, r := range g.Refs {
+			for _, b := range r.Branches {
+				if b != domain.BranchAll && b != domain.BranchTags && !contains(branches, b) {
+					branches = append(branches, b)
+				}
+			}
+		}
+		e := ciEnvironment{Name: g.Environment}
+		if len(branches) == 1 {
+			e.Branch = branches[0]
+		}
+		envs = append(envs, e)
+	}
+	sort.Slice(envs, func(i, j int) bool { return envs[i].Name < envs[j].Name })
+	return envs
+}
+
 // environmentsFromCI replaces the branch-derived environment with the ones
 // the CI files under root deploy to; p is returned unchanged when they name
 // none. An environment's branch is the single branch its CI jobs run on,
@@ -287,34 +319,18 @@ func environmentsFromCI(p initPlan, root string) (initPlan, error) {
 	var envs []string
 	branchOf := map[string]string{}
 	used := map[string]bool{}
-	for _, g := range domain.GroupByEnvironment(refs) {
-		env := g.Environment
-		if !keyLike(env) {
-			continue // shared scope, or an expression like ${{ inputs.target }}
-		}
-		var ciBranches []string
-		for _, r := range g.Refs {
-			for _, b := range r.Branches {
-				if b != domain.BranchAll && b != domain.BranchTags && !contains(ciBranches, b) {
-					ciBranches = append(ciBranches, b)
-				}
-			}
-		}
-		branch := p.BranchOf(env)
-		if len(ciBranches) == 1 {
-			branch = ciBranches[0]
-		}
+	for _, e := range ciEnvironments(refs) {
+		branch := first(e.Branch, p.BranchOf(e.Name))
 		if used[branch] {
-			branch = env
+			branch = e.Name
 		}
 		used[branch] = true
-		branchOf[env] = branch
-		envs = append(envs, env)
+		branchOf[e.Name] = branch
+		envs = append(envs, e.Name)
 	}
 	if len(envs) == 0 {
 		return p, nil
 	}
-	sort.Strings(envs)
 	p.Environments, p.branchOf = envs, branchOf
 	return p, nil
 }
@@ -398,6 +414,7 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 		fmt.Fprintf(out, "  branch %s -> environment %s\n", p.BranchOf(e), e)
 	}
 
+	o.fixedEnvs = true
 	if err := cmdGen(p.config(), o, out); err != nil {
 		return err
 	}
