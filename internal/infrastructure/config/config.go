@@ -71,7 +71,7 @@ type SSHCheck struct {
 	Host       string `yaml:"host"`
 	User       string `yaml:"user"`
 	Port       string `yaml:"port"`
-	KnownHosts string `yaml:"known_hosts"`
+	KnownHosts string `yaml:"known_hosts"` // ignored: host keys are not checked; kept so older files load
 }
 
 type RegistryCheck struct {

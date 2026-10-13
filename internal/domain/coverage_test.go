@@ -95,9 +95,9 @@ func TestSplitEmpty(t *testing.T) {
 	}
 }
 
-func TestFamilyAndKnownHosts(t *testing.T) {
+func TestFamilyAndSSHKeyName(t *testing.T) {
 	for k, want := range map[string]string{
-		"SSH_HOST": "ssh", "DEPLOY_SSH_KEY": "ssh", "GIT_PRIVATE_KEY": "ssh", "SSH_KNOWN_HOSTS": "ssh", "DEPLOY_KNOWN_HOSTS": "ssh",
+		"SSH_HOST": "ssh", "DEPLOY_SSH_KEY": "ssh", "GIT_PRIVATE_KEY": "ssh",
 		"REGISTRY": "registry", "REGISTRY_USER": "registry", "HARBOR_REGISTRY_TOKEN": "registry", "GHCR_TOKEN": "registry",
 		"DOCKERHUB_TOKEN": "registry", "DOCKER_PASSWORD": "registry", "DATABASE_URL": "", "API_KEY": "",
 	} {
@@ -105,12 +105,12 @@ func TestFamilyAndKnownHosts(t *testing.T) {
 			t.Errorf("Family(%q) = %q, want %q", k, got, want)
 		}
 	}
-	for k, want := range map[string]string{
-		"SSH_PRIVATE_KEY": "SSH_KNOWN_HOSTS", "SSH_KEY": "SSH_KNOWN_HOSTS", "DEPLOY_SSH_KEY": "DEPLOY_KNOWN_HOSTS",
-		"PROD_SSH_PRIVATE_KEY": "PROD_KNOWN_HOSTS", "GIT_PRIVATE_KEY": "GIT_KNOWN_HOSTS", "API_KEY": "", "SSH_HOST": "",
+	for k, want := range map[string]bool{
+		"SSH_PRIVATE_KEY": true, "SSH_KEY": true, "DEPLOY_SSH_KEY": true,
+		"PROD_SSH_PRIVATE_KEY": true, "GIT_PRIVATE_KEY": true, "API_KEY": false, "SSH_HOST": false,
 	} {
-		if got := KnownHostsFor(k); got != want {
-			t.Errorf("KnownHostsFor(%q) = %q, want %q", k, got, want)
+		if got := IsSSHKeyName(k); got != want {
+			t.Errorf("IsSSHKeyName(%q) = %v, want %v", k, got, want)
 		}
 	}
 }

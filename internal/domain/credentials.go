@@ -9,7 +9,7 @@ import (
 // variable names, never values. Empty Host or User means the key can only be
 // parsed, not tried against a server.
 type SSHCredential struct {
-	Key, Host, User, Port, KnownHosts, Passphrase string
+	Key, Host, User, Port, Passphrase string
 }
 
 // RegistryCredential is one container registry login. Registry is a host
@@ -62,7 +62,6 @@ func DetectSSH(vars []Variable) []SSHCredential {
 			Host:       pick("HOST", "SERVER"),
 			User:       pick("USER", "USERNAME"),
 			Port:       pick("PORT"),
-			KnownHosts: pick("KNOWN_HOSTS"),
 			Passphrase: pick("PASSPHRASE", "KEY_PASSPHRASE"),
 		})
 	}
@@ -141,7 +140,7 @@ func dedupeRegistries(in []RegistryCredential) []RegistryCredential {
 
 // Keys lists every variable name a credential depends on.
 func (c SSHCredential) Keys() []string {
-	return nonEmpty(c.Key, c.Host, c.User, c.Port, c.KnownHosts, c.Passphrase)
+	return nonEmpty(c.Key, c.Host, c.User, c.Port, c.Passphrase)
 }
 
 func (c RegistryCredential) Keys() []string { return nonEmpty(c.Username, c.Password) }
@@ -179,13 +178,13 @@ func nonEmpty(xs ...string) []string {
 }
 
 // Family groups credential keys that belong together in a file:
-// "ssh" (SSH_*, *_SSH_*, *_PRIVATE_KEY, *_KNOWN_HOSTS), "registry"
+// "ssh" (SSH_*, *_SSH_*, *_PRIVATE_KEY), "registry"
 // (REGISTRY*, *_REGISTRY*, GHCR_*, DOCKERHUB_*, DOCKER_*), or "" for others.
 func Family(key string) string {
 	k := strings.ToUpper(key)
 	switch {
 	case strings.HasPrefix(k, "SSH_") || strings.Contains(k, "_SSH_") || strings.HasSuffix(k, "_SSH_KEY") ||
-		strings.HasSuffix(k, "_PRIVATE_KEY") || strings.HasSuffix(k, "KNOWN_HOSTS"):
+		strings.HasSuffix(k, "_PRIVATE_KEY"):
 		return "ssh"
 	case strings.HasPrefix(k, "REGISTRY") || strings.Contains(k, "_REGISTRY") || strings.HasPrefix(k, "GHCR_") ||
 		strings.HasPrefix(k, "DOCKERHUB_") || strings.HasPrefix(k, "DOCKER_"):
@@ -194,17 +193,10 @@ func Family(key string) string {
 	return ""
 }
 
-// KnownHostsFor names the known-hosts variable env4ci verify reads for an
-// SSH key variable: SSH_PRIVATE_KEY -> SSH_KNOWN_HOSTS, DEPLOY_SSH_KEY ->
-// DEPLOY_KNOWN_HOSTS. Empty when key is not an SSH key name.
-func KnownHostsFor(key string) string {
+// IsSSHKeyName reports whether key names an SSH private key variable:
+// SSH_PRIVATE_KEY, SSH_KEY, *_SSH_KEY, *_SSH_PRIVATE_KEY, *_PRIVATE_KEY.
+func IsSSHKeyName(key string) bool {
 	k := strings.ToUpper(key)
-	if k != "SSH_PRIVATE_KEY" && k != "SSH_KEY" && !strings.HasSuffix(k, "_SSH_KEY") &&
-		!strings.HasSuffix(k, "_SSH_PRIVATE_KEY") && !strings.HasSuffix(k, "_PRIVATE_KEY") {
-		return ""
-	}
-	if p := keyPrefix(k, "_SSH_PRIVATE_KEY", "_PRIVATE_KEY", "_SSH_KEY"); p != "" {
-		return p + "_KNOWN_HOSTS"
-	}
-	return "SSH_KNOWN_HOSTS"
+	return k == "SSH_PRIVATE_KEY" || k == "SSH_KEY" || strings.HasSuffix(k, "_SSH_KEY") ||
+		strings.HasSuffix(k, "_SSH_PRIVATE_KEY") || strings.HasSuffix(k, "_PRIVATE_KEY")
 }

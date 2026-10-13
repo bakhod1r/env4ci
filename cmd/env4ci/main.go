@@ -266,7 +266,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 			return err
 		}
 		local = dropEmpty(local, o, out)
-		checks := credentialChecks(cfg, local)
+		checks := credentialChecks(cfg, local, true)
 		if len(checks) == 0 {
 			fmt.Fprintln(out, "No SSH keys or registry credentials found.")
 			return nil
@@ -410,7 +410,7 @@ func syncOne(ctx context.Context, cmd string, cfg config.Config, o opts, pos []s
 		return nil
 	}
 	if !o.noVerify {
-		if err := runCredentialChecks(ctx, out, credentialChecks(cfg, local), application.TouchedKeys(plan)); err != nil {
+		if err := runCredentialChecks(ctx, out, credentialChecks(cfg, local, false), application.TouchedKeys(plan)); err != nil {
 			return err
 		}
 	}
@@ -732,7 +732,9 @@ func printPlan(out io.Writer, target string, p domain.Plan, prune bool) {
 
 // credentialChecks merges auto-detected credentials with env4ci.yaml checks:.
 // A configured entry replaces a detected one for the same key/password.
-func credentialChecks(cfg config.Config, vars []domain.Variable) []application.Check {
+// withSSH adds SSH logins: only "env4ci verify" tries them, push and
+// rotate do not.
+func credentialChecks(cfg config.Config, vars []domain.Variable, withSSH bool) []application.Check {
 	sshByKey := map[string]domain.SSHCredential{}
 	var sshOrder []string
 	add := func(c domain.SSHCredential) {
@@ -741,11 +743,13 @@ func credentialChecks(cfg config.Config, vars []domain.Variable) []application.C
 		}
 		sshByKey[c.Key] = c
 	}
-	for _, c := range domain.DetectSSH(vars) {
-		add(c)
-	}
-	for _, c := range cfg.Checks.SSH {
-		add(domain.SSHCredential{Key: c.Key, Host: c.Host, User: c.User, Port: c.Port, KnownHosts: c.KnownHosts})
+	if withSSH {
+		for _, c := range domain.DetectSSH(vars) {
+			add(c)
+		}
+		for _, c := range cfg.Checks.SSH {
+			add(domain.SSHCredential{Key: c.Key, Host: c.Host, User: c.User, Port: c.Port})
+		}
 	}
 	var sshCreds []domain.SSHCredential
 	for _, k := range sshOrder {

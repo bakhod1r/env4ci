@@ -23,8 +23,8 @@ func TestDetectSSH(t *testing.T) {
 	}{
 		{
 			name: "generic SSH_* names",
-			in:   vars("SSH_PRIVATE_KEY", fakeKey, "SSH_HOST", "h", "SSH_USER", "u", "SSH_PORT", "22", "SSH_KNOWN_HOSTS", "k"),
-			want: []SSHCredential{{Key: "SSH_PRIVATE_KEY", Host: "SSH_HOST", User: "SSH_USER", Port: "SSH_PORT", KnownHosts: "SSH_KNOWN_HOSTS"}},
+			in:   vars("SSH_PRIVATE_KEY", fakeKey, "SSH_HOST", "h", "SSH_USER", "u", "SSH_PORT", "22"),
+			want: []SSHCredential{{Key: "SSH_PRIVATE_KEY", Host: "SSH_HOST", User: "SSH_USER", Port: "SSH_PORT"}},
 		},
 		{
 			name: "prefixed names win over generic",

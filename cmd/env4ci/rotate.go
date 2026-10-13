@@ -80,10 +80,10 @@ func cmdRotate(ctx context.Context, cfg config.Config, o opts, pos []string, in 
 		fmt.Fprintf(out, "\nNew public key for %s. Add it to the server's ~/.ssh/authorized_keys\n(remove the old key after the push):\n\n  %s\n\n", key, pub)
 	}
 	if !o.noVerify {
-		if pub != "" && !o.yes && !confirm(br, out, "Public key installed? Verify login and continue [y/N] ") {
+		if pub != "" && !o.yes && !confirm(br, out, "Public key installed on the server? Continue [y/N] ") {
 			return errors.New("aborted")
 		}
-		if err := runCredentialChecks(ctx, out, credentialChecks(cfg, local), map[string]bool{key: true}); err != nil {
+		if err := runCredentialChecks(ctx, out, credentialChecks(cfg, local, false), map[string]bool{key: true}); err != nil {
 			return err
 		}
 	}
@@ -133,7 +133,7 @@ func cmdRotate(ctx context.Context, cfg config.Config, o opts, pos []string, in 
 // one, else a random secret), a hidden prompt on a terminal, or stdin.
 func newValue(key, old string, o opts, br *bufio.Reader, out io.Writer) (val, pub string, err error) {
 	switch {
-	case o.generate && (domain.LooksLikePrivateKey(old) || domain.KnownHostsFor(key) != ""):
+	case o.generate && (domain.LooksLikePrivateKey(old) || domain.IsSSHKeyName(key)):
 		val, pub = keygen.SSH("env4ci " + key)
 		return val, pub, nil
 	case o.generate:

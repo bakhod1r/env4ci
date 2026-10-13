@@ -304,8 +304,9 @@ func TestPushBlockedByFailedCredentialCheck(t *testing.T) {
 	cfg := filepath.Join(dir, "env4ci.yaml")
 	os.WriteFile(cfg, []byte("targets:\n  gitlab:\n    project: g/p\n    base_url: "+srv.URL+"\n"), 0o600)
 	env := filepath.Join(dir, ".env")
-	// Port 1 refuses connections: the login cannot succeed.
-	os.WriteFile(env, []byte("SSH_PRIVATE_KEY=\""+key+"\"\nSSH_HOST=127.0.0.1:1\nSSH_USER=deployer\nSSH_KNOWN_HOSTS=\"# no hosts here\"\n"), 0o600)
+	// Port 1 refuses connections: the registry login cannot succeed. The SSH
+	// key next to it is not tried by push at all.
+	os.WriteFile(env, []byte("SSH_PRIVATE_KEY=\""+key+"\"\nSSH_HOST=127.0.0.1:1\nSSH_USER=deployer\nREGISTRY=127.0.0.1:1\nREGISTRY_USER=deployer1\nREGISTRY_PASSWORD=password1\n"), 0o600)
 	t.Setenv("GITLAB_TOKEN", "tok")
 
 	var out bytes.Buffer
@@ -313,7 +314,7 @@ func TestPushBlockedByFailedCredentialCheck(t *testing.T) {
 	if !errors.Is(err, errCheckFailed) || writes != 0 {
 		t.Fatalf("err=%v writes=%d\n%s", err, writes, out.String())
 	}
-	if !strings.Contains(out.String(), "✗ ssh deployer@127.0.0.1:1 (SSH_PRIVATE_KEY)") || strings.Contains(out.String(), "PRIVATE KEY-----") {
+	if !strings.Contains(out.String(), "✗ ") || strings.Contains(out.String(), "ssh deployer") || strings.Contains(out.String(), "PRIVATE KEY-----") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 
@@ -438,7 +439,7 @@ func TestEmptyValuesNeverPushed(t *testing.T) {
 func TestPublicRegistrySuppressesDetectedLogin(t *testing.T) {
 	cfg := config.Config{Checks: config.Checks{Registry: []config.RegistryCheck{{Registry: "ghcr.io", Public: true}}}}
 	vars := []domain.Variable{{Key: "GHCR_TOKEN", Value: "x"}, {Key: "GHCR_USER", Value: "u"}}
-	cs := credentialChecks(cfg, vars)
+	cs := credentialChecks(cfg, vars, true)
 	if len(cs) != 1 || !strings.Contains(cs[0].Name, "public") {
 		var names []string
 		for _, c := range cs {

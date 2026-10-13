@@ -119,17 +119,15 @@ classification is ignored there. `pull` reads every value back.
 
 ## Credential checks
 
-Before `push` writes, credentials it is about to store are tried for real:
+Before `push` writes, registry credentials it is about to store are tried for real:
+`GHCR_TOKEN` (+ `GHCR_USER`) → ghcr.io, `DOCKERHUB_TOKEN` → Docker Hub,
+`REGISTRY_PASSWORD` + `REGISTRY_USER` + `REGISTRY` → any v2 registry.
+Any failure stops the push before anything is written; `--no-verify` skips the checks.
 
-- **SSH keys** (`SSH_PRIVATE_KEY` + `SSH_HOST` + `SSH_USER` [+ `SSH_PORT`, `SSH_KNOWN_HOSTS`, `*_PASSPHRASE`],
-  or `DEPLOY_SSH_KEY` + `DEPLOY_HOST` ...): SSH handshake and public-key login, then disconnect; no command runs.
-  `SSH_KNOWN_HOSTS` is optional. When it is set (or `~/.ssh/known_hosts` lists the host), the server's host key must match; otherwise any host key is accepted.
-  A key without host/user is only parsed.
-- **Container registries**: `GHCR_TOKEN` (+ `GHCR_USER`) → ghcr.io, `DOCKERHUB_TOKEN` → Docker Hub,
-  `REGISTRY_PASSWORD` + `REGISTRY_USER` + `REGISTRY` → any v2 registry.
-
-Any failure stops the push before anything is written. `env4ci verify` runs the checks alone;
-`--no-verify` skips them. Other names go under `checks:` in env4ci.yaml.
+SSH keys are not checked by `push` or `rotate`. `env4ci verify` tries them on request
+(`SSH_PRIVATE_KEY` + `SSH_HOST` + `SSH_USER` [+ `SSH_PORT`, `*_PASSPHRASE`], or `DEPLOY_SSH_KEY` + `DEPLOY_HOST` ...):
+SSH handshake and public-key login, then disconnect; no command runs and the server's host key is not checked.
+A key without host/user is only parsed. Other names go under `checks:` in env4ci.yaml.
 
 On GitLab, multi-line secrets (SSH keys, certificates) are stored as **file** variables because GitLab cannot mask them.
 

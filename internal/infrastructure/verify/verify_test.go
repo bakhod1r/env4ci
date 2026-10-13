@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/bakhod1r/env4ci/internal/domain"
 )
@@ -39,7 +38,7 @@ func newKey(t *testing.T, passphrase string) (pemStr string, pub ssh.PublicKey) 
 }
 
 // sshServer accepts only `authorized` for user "deploy".
-func sshServer(t *testing.T, authorized ssh.PublicKey) (addr, knownHostsLine string) {
+func sshServer(t *testing.T, authorized ssh.PublicKey) (addr string) {
 	t.Helper()
 	_, hostPriv, _ := ed25519.GenerateKey(rand.Reader)
 	hostSigner, _ := ssh.NewSignerFromKey(hostPriv)
@@ -77,21 +76,15 @@ func sshServer(t *testing.T, authorized ssh.PublicKey) (addr, knownHostsLine str
 		}
 	}()
 	addr = ln.Addr().String()
-	return addr, knownhosts.Line([]string{knownhosts.Normalize(addr)}, hostSigner.PublicKey())
-}
-
-// bareKey drops the host column: "ssh-ed25519 AAAA..." as some people paste it.
-func bareKey(line string) string {
-	return strings.Join(strings.Fields(line)[1:], " ")
+	return addr
 }
 
 func TestSSH(t *testing.T) {
 	good, goodPub := newKey(t, "")
 	other, _ := newKey(t, "")
 	locked, lockedPub := newKey(t, "s3cret")
-	addr, kh := sshServer(t, goodPub)
-	lockedAddr, lockedKH := sshServer(t, lockedPub)
-	_, wrongKH := sshServer(t, goodPub) // a different server's host key
+	addr := sshServer(t, goodPub)
+	lockedAddr := sshServer(t, lockedPub)
 	host, port, _ := net.SplitHostPort(addr)
 
 	cases := []struct {
@@ -99,24 +92,17 @@ func TestSSH(t *testing.T) {
 		login   SSHLogin
 		wantErr string
 	}{
-		{"valid key, host:port in host", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: kh}, ""},
-		{"valid key, separate port", SSHLogin{Key: good, Host: host, Port: port, User: "deploy", KnownHosts: kh}, ""},
-		{"escaped newlines tolerated", SSHLogin{Key: strings.ReplaceAll(good, "\n", `\n`), Host: addr, User: "deploy", KnownHosts: kh}, ""},
-		{"key not authorized", SSHLogin{Key: other, Host: addr, User: "deploy", KnownHosts: kh}, "rejected the key"},
-		{"wrong user", SSHLogin{Key: good, Host: addr, User: "root", KnownHosts: kh}, "rejected the key"},
-		{"unknown host key", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: "# empty"}, "not in known_hosts"},
-		{"changed host key", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: strings.Replace(wrongKH, knownhosts.Normalize(strings.Fields(wrongKH)[0]), knownhosts.Normalize(addr), 1)}, "does NOT match"},
+		{"valid key, host:port in host", SSHLogin{Key: good, Host: addr, User: "deploy"}, ""},
+		{"valid key, separate port", SSHLogin{Key: good, Host: host, Port: port, User: "deploy"}, ""},
+		{"escaped newlines tolerated", SSHLogin{Key: strings.ReplaceAll(good, "\n", `\n`), Host: addr, User: "deploy"}, ""},
+		{"key not authorized", SSHLogin{Key: other, Host: addr, User: "deploy"}, "rejected the key"},
+		{"wrong user", SSHLogin{Key: good, Host: addr, User: "root"}, "rejected the key"},
 		{"garbage key", SSHLogin{Key: "-----BEGIN OPENSSH PRIVATE KEY-----\nnope\n-----END OPENSSH PRIVATE KEY-----"}, "not a valid"},
 		{"parse-only without host", SSHLogin{Key: good}, ""},
 		{"passphrase missing", SSHLogin{Key: locked}, "passphrase-protected"},
 		{"passphrase wrong", SSHLogin{Key: locked, Passphrase: "nope"}, "passphrase is wrong"},
-		{"passphrase ok", SSHLogin{Key: locked, Passphrase: "s3cret", Host: lockedAddr, User: "deploy", KnownHosts: lockedKH}, ""},
-		{"server down", SSHLogin{Key: good, Host: "127.0.0.1:1", User: "deploy", KnownHosts: kh}, "connect"},
-		{"bare host key, no host column", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: bareKey(kh)}, ""},
-		{"bare host key, separate port", SSHLogin{Key: good, Host: host, Port: port, User: "deploy", KnownHosts: bareKey(kh)}, ""},
-		{"escaped newlines and keyscan comment", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: `# ` + addr + ` SSH-2.0-OpenSSH\n` + kh}, ""},
-		{"bare key of another server", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: bareKey(wrongKH)}, "does NOT match"},
-		{"not a key at all", SSHLogin{Key: good, Host: addr, User: "deploy", KnownHosts: "hello"}, "known_hosts value: line 1 is not a known_hosts entry"},
+		{"passphrase ok", SSHLogin{Key: locked, Passphrase: "s3cret", Host: lockedAddr, User: "deploy"}, ""},
+		{"server down", SSHLogin{Key: good, Host: "127.0.0.1:1", User: "deploy"}, "connect"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

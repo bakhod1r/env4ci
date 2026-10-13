@@ -249,3 +249,13 @@ func TestReadHiddenWithoutTerminal(t *testing.T) {
 		t.Skip("stdin is a terminal")
 	}
 }
+
+func TestRotateBlockedByFailedRegistryCheck(t *testing.T) {
+	// Port 1 refuses connections: the new registry password cannot log in.
+	_, cfg, store := vaultProject(t, map[string]string{"production": "REGISTRY=127.0.0.1:1\nREGISTRY_USER=deployer1\nREGISTRY_PASSWORD=old_password\n"})
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"rotate", "REGISTRY_PASSWORD", "-c", cfg, "-e", "production", "-y", "--generate"}, strings.NewReader(""), &out)
+	if !errors.Is(err, errCheckFailed) || len(store) != 0 {
+		t.Fatalf("err=%v store=%v\n%s", err, store, out.String())
+	}
+}

@@ -461,7 +461,10 @@ func TestResolveTargetMoreBranches(t *testing.T) {
 func TestCredentialChecksConfigSSHAndAllPass(t *testing.T) {
 	key := strings.ReplaceAll(parseOnlyKey(t), `\n`, "\n")
 	cfg := config.Config{Checks: config.Checks{SSH: []config.SSHCheck{{Key: "MY_KEY"}}}}
-	cs := credentialChecks(cfg, []domain.Variable{{Key: "MY_KEY", Value: key}})
+	cs := credentialChecks(cfg, []domain.Variable{{Key: "MY_KEY", Value: key}}, true)
+	if n := len(credentialChecks(cfg, []domain.Variable{{Key: "MY_KEY", Value: key}}, false)); n != 0 {
+		t.Fatalf("push runs %d SSH checks", n)
+	}
 	if len(cs) != 1 {
 		t.Fatalf("%d checks", len(cs))
 	}
