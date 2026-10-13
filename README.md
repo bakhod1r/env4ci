@@ -22,6 +22,15 @@ scoop install env4ci                                       # Windows / Scoop
 go install github.com/bakhod1r/env4ci/cmd/env4ci@latest    # with Go
 ```
 
+Update an installed binary:
+
+```bash
+env4ci update           # download the latest release, verify checksums.txt, replace this binary
+env4ci update --check   # only say whether a newer release exists
+```
+
+A Homebrew or Scoop install is left alone: `update` prints the `brew upgrade` / `scoop update` command instead.
+
 GitHub Actions:
 
 ```yaml

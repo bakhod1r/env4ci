@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -54,6 +55,8 @@ Usage:
   env4ci leaks                      exit 2 if tracked files contain secret values from local env files
                                     (--staged: only what the next commit adds)
   env4ci hook                       install a git pre-commit hook running "env4ci leaks --staged"
+  env4ci update                     replace this binary with the latest release (checksum verified);
+                                    --check only reports
   env4ci version
 
 Flags (after the subcommand):
@@ -73,6 +76,7 @@ Flags (after the subcommand):
   --dir          scan/check: project root (default .)
   --generate     rotate: random secret, or a new ed25519 key for SSH key variables
   --exit-code    diff: exit 2 when there are changes (for CI drift checks)
+  --check        update: report a newer release without installing it
 
 Tokens: GITHUB_TOKEN or GH_TOKEN (falls back to "gh auth token"), GITLAB_TOKEN,
 VAULT_TOKEN (falls back to ~/.vault-token). Vault address: VAULT_ADDR.
@@ -119,6 +123,7 @@ type opts struct {
 	prune, yes, write, exitCode  bool
 	shared, noVerify, all        bool
 	allowEmpty, staged, generate bool
+	check                        bool
 	targets, envs                string
 }
 
@@ -153,6 +158,7 @@ func parseFlags(args []string) (opts, []string, error) {
 	fs.BoolVar(&o.allowEmpty, "allow-empty", false, "")
 	fs.BoolVar(&o.staged, "staged", false, "")
 	fs.BoolVar(&o.generate, "generate", false, "")
+	fs.BoolVar(&o.check, "check", false, "")
 	fs.StringVar(&o.targets, "targets", "", "")
 	fs.StringVar(&o.envs, "envs", "", "")
 
@@ -185,6 +191,8 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer) error 
 	case "version":
 		fmt.Fprintln(out, "env4ci", version)
 		return nil
+	case "update":
+		return cmdUpdate(ctx, o, out, newReleaseSource(), runtime.GOOS, runtime.GOARCH)
 	case "init":
 		if o.targets == "" && o.envs == "" && !isTerminal(in) {
 			return cmdInit(o, out) // non-interactive, no flags: commented template

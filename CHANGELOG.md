@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `env4ci update`: replace the binary with the latest GitHub release after checking it against `checksums.txt`; `--check` only reports. Homebrew / Scoop installs are pointed to their own upgrade command.
 - `env4ci gen`: `.env.env4ci` (env4ci tokens/addresses, auto-loaded, never synced) plus one `.env.<env>` per environment pre-filled from CI files; only appends missing keys. `init` runs it.
 - HashiCorp Vault KV v2 target (`targets.vault`, `path: app/{env}`), check-and-set writes, one version per push.
 - `env4ci init` wizard: one or many environments; github / gitlab / vault targets; `--targets`, `--envs`.
