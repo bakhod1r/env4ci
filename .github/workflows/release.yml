@@ -1,7 +1,7 @@
 name: release
 on:
   push:
-    tags: ["v*.*.*"] # not the moving major tag (v0)
+    tags: ["v*.*.*"] # not the moving major tags (v0, v1)
 permissions:
   contents: write
   id-token: write

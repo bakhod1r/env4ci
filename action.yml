@@ -6,7 +6,7 @@ branding:
   color: green
 inputs:
   version:
-    description: Release to install, e.g. v0.1.0 (default latest)
+    description: Release to install, e.g. v1.0.0 (default latest)
     required: false
     default: latest
 outputs:

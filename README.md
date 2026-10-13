@@ -13,7 +13,7 @@ No Go needed — every release ships static binaries.
 ```bash
 # macOS / Linux (detects OS and arch, verifies checksums.txt)
 curl -sSfL https://raw.githubusercontent.com/bakhod1r/env4ci/main/install.sh | sh
-#   ENV4CI_VERSION=v0.1.0 pins a release; BINDIR=~/bin picks the directory
+#   ENV4CI_VERSION=v1.0.0 pins a release; BINDIR=~/bin picks the directory
 
 brew install bakhod1r/tap/env4ci                           # Homebrew
 scoop bucket add bakhod1r https://github.com/bakhod1r/scoop-bucket
@@ -44,7 +44,7 @@ env4ci completion fish > ~/.config/fish/completions/env4ci.fish
 GitHub Actions:
 
 ```yaml
-- uses: bakhod1r/env4ci@v0        # with: { version: v0.1.0 } to pin
+- uses: bakhod1r/env4ci@v1        # with: { version: v1.0.0 } to pin
 - run: env4ci check github --all  # exit 2 if CI uses secrets the repo lacks
   env:
     GITHUB_TOKEN: ${{ secrets.ENV4CI_TOKEN }}
