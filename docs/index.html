@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Env4CI</title>
-<meta name="description" content="Sync environment variables and secrets across GitHub Actions, GitLab CI/CD and HashiCorp Vault.">
+<meta name="description" content="Sync environment variables and secrets across GitHub Actions, GitLab CI/CD, HashiCorp Vault and Jenkins.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -62,7 +62,7 @@ footer a{color:var(--muted)}
 <header class="hero">
   <div>
     <h1>Environment configuration for CI/CD.</h1>
-    <p class="lead">Sync <code>.env</code> files with GitHub Actions, GitLab CI/CD and HashiCorp Vault. Review a plan before anything changes. Secret values are never printed.</p>
+    <p class="lead">Sync <code>.env</code> files with GitHub Actions, GitLab CI/CD, HashiCorp Vault and Jenkins credentials. Review a plan before anything changes. Secret values are never printed.</p>
     <div class="install"><code id="cmd">curl -sSfL https://raw.githubusercontent.com/bakhod1r/env4ci/main/install.sh | sh</code><button id="copy" type="button">Copy</button></div>
     <p class="sub">No Go needed. Also: <code>brew install bakhod1r/tap/env4ci</code> · <code>scoop install env4ci</code> · <code>uses: bakhod1r/env4ci@v0</code> · <code>go install</code></p>
     <div class="cta"><a class="btn primary" href="https://github.com/bakhod1r/env4ci#usage">Get started</a><a class="btn ghost" href="https://github.com/bakhod1r/env4ci">Source</a></div>
@@ -133,7 +133,7 @@ targets:
     </div>
     <div>
       <h2>Commands</h2>
-      <p class="sub">Provider commands take <code>github</code>, <code>gitlab</code> or <code>vault</code>; default comes from env4ci.yaml or git remote.</p>
+      <p class="sub">Provider commands take <code>github</code>, <code>gitlab</code>, <code>vault</code> or <code>jenkins</code>; default comes from env4ci.yaml or git remote.</p>
       <table>
         <tr><td>init</td><td>Create env4ci.yaml (wizard on a terminal)</td></tr>
         <tr><td>gen</td><td>Auth file + one gitignored env file per environment</td></tr>
