@@ -74,6 +74,7 @@ func cmdGen(cfg config.Config, o opts, out io.Writer) error {
 		if cfg, err = addCIEnvironments(cfg, o.config, refs, out, ui); err != nil {
 			return err
 		}
+		warnGoneEnvironments(cfg, o.config, refs, out, ui)
 	}
 
 	// 1. env4ci's own settings.
@@ -205,6 +206,46 @@ func addCIEnvironments(cfg config.Config, configPath string, refs []domain.Refer
 	}
 	cfg.Environments, cfg.Branches = files, branches
 	return cfg, nil
+}
+
+// warnGoneEnvironments names every environment of env4ci.yaml the CI files
+// no longer deploy to (a removed environment: or branch). Nothing is
+// deleted: the env file may hold the only copy of its values.
+func warnGoneEnvironments(cfg config.Config, configPath string, refs []domain.Reference, out io.Writer, ui palette) {
+	ci := ciEnvironments(refs)
+	if len(ci) == 0 {
+		return // CI names no environment at all: nothing to compare
+	}
+	live := map[string]bool{}
+	for _, e := range ci {
+		live[e.Name] = true
+		if env, ok := domain.BranchMap(cfg.Branches).Environment(e.Branch); ok && e.Branch != "" {
+			live[env] = true // the branch deploys there under the config's name
+		}
+	}
+	names := make([]string, 0, len(cfg.Environments))
+	for n := range cfg.Environments {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if live[n] {
+			continue
+		}
+		var branches []string
+		for b, e := range cfg.Branches {
+			if e == n {
+				branches = append(branches, b)
+			}
+		}
+		sort.Strings(branches)
+		via := ""
+		if len(branches) > 0 {
+			via = " (branch " + strings.Join(branches, ", ") + ")"
+		}
+		fmt.Fprintf(out, "%s CI no longer deploys to environment %s%s; if it is gone, remove it from %s and delete %s\n",
+			ui.Yellow("!"), n, via, filepath.ToSlash(configPath), filepath.ToSlash(cfg.Environments[n]))
+	}
 }
 
 func copyMap(m map[string]string) map[string]string {

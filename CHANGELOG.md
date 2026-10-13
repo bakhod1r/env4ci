@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `env4ci gen` warns about an environment in `env4ci.yaml` the CI files no longer deploy to (for example a branch removed from `branches: [dev, main]`). Nothing is deleted: the env file may hold the only copy of its values.
 - `env4ci completion bash|zsh|fish`: tab completion of commands, each command's flags and provider names. `install.sh` installs the scripts.
 - CI files that name no `environment:` but run on listed branches (`on: push: branches: [dev, main]`) give one environment per branch in `init` and `gen` (`main` -> `production`, `dev` -> `staging`, else the branch name). With `environment: ${{ github.ref_name }}` the environment is the branch's own name, and those jobs' keys go into every environment file.
 - README: how to get the GitHub, GitLab and Vault tokens. GitHub environment secrets/variables need the *Environments* read/write permission (the docs said read).

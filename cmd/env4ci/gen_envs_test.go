@@ -289,3 +289,38 @@ func TestGenEnvironmentsFromCIBranchList(t *testing.T) {
 		t.Fatalf("config changed:\n%s", text)
 	}
 }
+
+func TestGenWarnsAboutEnvironmentsCIDropped(t *testing.T) {
+	cfg := "branches:\n  \"main\": production\n  \"dev\": staging\n  \"live\": prod2\nenvironments:\n  production: .github/production.env\n  staging: .github/staging.env\n  prod2: .github/prod2.env\ntargets:\n  github: { repo: a/b }\n"
+	// dev was removed from the CI branch list; live deploys to prod2 under the config's name.
+	dir, cfgPath := ciProject(t, cfg, branchWorkflow("[main, live]", ""))
+	os.WriteFile(filepath.Join(dir, ".github", "staging.env"), []byte("DB_PASSWORD=keep\n"), 0o600)
+	out := gen(t, dir, cfgPath)
+	if !strings.Contains(out, "CI no longer deploys to environment staging (branch dev); if it is gone, remove it from") ||
+		!strings.Contains(out, "delete .github/staging.env") {
+		t.Fatal(out)
+	}
+	if strings.Contains(out, "environment production") || strings.Contains(out, "environment prod2 ") {
+		t.Fatalf("live environments flagged:\n%s", out)
+	}
+	// Nothing is deleted.
+	if b, _ := os.ReadFile(filepath.Join(dir, ".github", "staging.env")); !strings.HasPrefix(string(b), "DB_PASSWORD=keep\n") {
+		t.Fatalf("staging.env changed:\n%s", b)
+	}
+	c, _ := config.Load(cfgPath)
+	if c.Environments["staging"] == "" {
+		t.Fatal("staging removed from config")
+	}
+
+	// An environment with no branch, and CI naming no environment: no warning.
+	dir, cfgPath = ciProject(t, "environments:\n  production: .env.production\n  old: .env.old\ntargets:\n  github: { repo: a/b }\n",
+		"on: push\njobs:\n"+ciJob("a", "production"))
+	if out := gen(t, dir, cfgPath); !strings.Contains(out, "environment old; if it is gone") {
+		t.Fatal(out)
+	}
+	dir, cfgPath = ciProject(t, "environments:\n  production: .env.production\ntargets:\n  github: { repo: a/b }\n",
+		"on: push\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo ${{ secrets.A }}\n")
+	if out := gen(t, dir, cfgPath); strings.Contains(out, "no longer") {
+		t.Fatal(out)
+	}
+}
