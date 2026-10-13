@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -261,5 +262,42 @@ func TestInitWizardEnvironmentsFromCI(t *testing.T) {
 				t.Errorf("%s: ENVIRONMENT written more than once:\n%s", name, b)
 			}
 		}
+	}
+}
+
+func TestInitWizardCIEdgeCases(t *testing.T) {
+	workflow := func(body string) string {
+		dir := t.TempDir()
+		os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755)
+		os.WriteFile(filepath.Join(dir, ".github", "workflows", "deploy.yml"), []byte(body), 0o644)
+		return dir
+	}
+	job := func(id, env string) string {
+		return "  " + id + ":\n    runs-on: ubuntu-latest\n    environment: " + env + "\n    steps:\n      - run: echo ${{ secrets.DB_PASSWORD }}\n"
+	}
+	noBranch := fakeGit{remote: ghRemote, branchErr: errors.New("detached")}
+
+	// Two environments guessing the same branch: the second keeps its own name.
+	dir := workflow("on: push\njobs:\n" + job("a", "prod") + job("b", "production"))
+	cfg := filepath.Join(dir, "env4ci.yaml")
+	if err := cmdInitWizard(opts{config: cfg}, strings.NewReader("\n\n"), io.Discard, noBranch, true); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"main": "prod", "production": "production"}; !reflect.DeepEqual(c.Branches, want) {
+		t.Errorf("branches = %v, want %v", c.Branches, want)
+	}
+
+	// Unreadable CI file: fail before env4ci.yaml is written.
+	dir = workflow("jobs: [unclosed\n")
+	cfg = filepath.Join(dir, "env4ci.yaml")
+	if err := cmdInitWizard(opts{config: cfg}, strings.NewReader("\n\n"), io.Discard, noBranch, true); err == nil {
+		t.Fatal("want CI scan error")
+	}
+	if _, err := os.Stat(cfg); err == nil {
+		t.Fatal("env4ci.yaml written despite the CI scan error")
 	}
 }

@@ -278,14 +278,11 @@ func defaultsFromGit(git gitReader) initPlan {
 // the CI files under root deploy to; p is returned unchanged when they name
 // none. An environment's branch is the single branch its CI jobs run on,
 // else the checked-out branch it was derived from, else a guess.
-func environmentsFromCI(p initPlan, root string) initPlan {
-	cl, err := p.config().Classifier()
-	if err != nil {
-		return p
-	}
+func environmentsFromCI(p initPlan, root string) (initPlan, error) {
+	cl, _ := p.config().Classifier() // init's own rules: always valid
 	refs, err := ciscan.Scan(root, cl)
 	if err != nil {
-		return p
+		return p, err
 	}
 	var envs []string
 	branchOf := map[string]string{}
@@ -315,11 +312,11 @@ func environmentsFromCI(p initPlan, root string) initPlan {
 		envs = append(envs, env)
 	}
 	if len(envs) == 0 {
-		return p
+		return p, nil
 	}
 	sort.Strings(envs)
 	p.Environments, p.branchOf = envs, branchOf
-	return p
+	return p, nil
 }
 
 // askInit prompts on in/out; empty answers keep defaults. Environments are
@@ -383,7 +380,10 @@ func cmdInitWizard(o opts, in io.Reader, out io.Writer, git gitReader, interacti
 		p = askInit(in, out, p)
 	}
 	if o.envs == "" {
-		p = environmentsFromCI(p, first(o.dir, filepath.Dir(o.config)))
+		var err error
+		if p, err = environmentsFromCI(p, first(o.dir, filepath.Dir(o.config))); err != nil {
+			return err
+		}
 	}
 	b, err := renderInit(p)
 	if err != nil {
