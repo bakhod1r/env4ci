@@ -236,12 +236,60 @@ Values shorter than 8 characters and non-secret keys are not searched. An existi
 
 ## Authentication
 
-| Provider | Token | Scope |
+| Provider | Token | Needs |
 |----------|-------|-------|
-| GitHub | `GITHUB_TOKEN` / `GH_TOKEN`, else `gh auth token` | fine-grained: *Secrets* + *Variables* read/write (+ *Environments* read) |
-| GitLab | `GITLAB_TOKEN` | `api`, Maintainer role |
+| GitHub | `GITHUB_TOKEN` / `GH_TOKEN`, else `gh auth token` | fine-grained: *Secrets*, *Variables* and *Environments* read/write · classic: `repo` |
+| GitLab | `GITLAB_TOKEN` | scope `api`, role Maintainer |
+| Vault | `VAULT_TOKEN`, else `~/.vault-token` | `create`, `read`, `update` on the KV v2 path |
+
+Put the token in the auth file `env4ci gen` creates (`.github/env4ci.env`, `.gitlab/env4ci.env` or `.env.env4ci`; gitignored, mode 0600), or export it. A real environment variable wins over the file. Tokens never go in env4ci.yaml.
 
 Self-hosted: `targets.github.base_url` (GHES `https://host/api/v3`), `targets.gitlab.base_url` or `GITLAB_URL`.
+
+### GitHub token
+
+Easiest: `gh auth login` once. env4ci then uses `gh auth token` and `GITHUB_TOKEN` can stay empty.
+
+For a token of its own (CI, or no `gh`):
+
+1. GitHub → your avatar → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
+2. **Resource owner**: the user or organization that owns the repository. **Repository access**: *Only select repositories* → the repository.
+3. **Repository permissions**, each *Read and write*:
+   - **Secrets** and **Variables** — repository level (`--shared`).
+   - **Environments** — secrets and variables of an environment (`-e production`, or a branch mapped through `branches:`).
+4. **Generate token**, copy it (`github_pat_...`; shown once) into `GITHUB_TOKEN`.
+
+An organization may have to approve the token before it works. A classic token (**Tokens (classic)**) needs the `repo` scope. The environment itself must already exist: repository → **Settings** → **Environments** → **New environment**.
+
+In GitHub Actions the built-in `GITHUB_TOKEN` cannot write secrets; store a token as a repository secret and pass it:
+
+```yaml
+env:
+  GITHUB_TOKEN: ${{ secrets.ENV4CI_TOKEN }}
+```
+
+### GitLab token
+
+1. Project → **Settings** → **Access tokens** → **Add new token** (a project access token; where the plan has none, use a personal one: avatar → **Edit profile** → **Access tokens**).
+2. **Role**: *Maintainer*. **Scopes**: `api`. Set an expiry date.
+3. **Create**, copy it (`glpat-...`; shown once) into `GITLAB_TOKEN`.
+
+A personal token works only if its user is Maintainer or Owner of the project. Self-hosted GitLab: also set `GITLAB_URL` (or `targets.gitlab.base_url`).
+
+### Vault token
+
+env4ci writes one KV v2 secret per environment at `<mount>/data/<path>`. For `mount: secret` and `path: api/{env}`:
+
+```bash
+vault policy write env4ci - <<'EOF'
+path "secret/data/api/*" {
+  capabilities = ["create", "read", "update"]
+}
+EOF
+vault token create -policy=env4ci -ttl=720h   # copy "token" into VAULT_TOKEN
+```
+
+Or log in as yourself with `vault login`: it writes `~/.vault-token`, which env4ci reads when `VAULT_TOKEN` is empty. `VAULT_ADDR` is the server address (else `targets.vault.address`); `VAULT_NAMESPACE` is for Enterprise / HCP namespaces.
 
 ## Reliability
 

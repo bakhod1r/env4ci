@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- README: how to get the GitHub, GitLab and Vault tokens. GitHub environment secrets/variables need the *Environments* read/write permission (the docs said read).
 - `env4ci gen` adds an environment the CI files deploy to that `env4ci.yaml` lacks: its `environments:` (and `branches:`) line is inserted, the rest of the file is untouched, and its `.env` file is created. Run it after changing CI files.
 - `env4ci <command> --help` and `env4ci help <command>`: one command's usage and flags. `env4ci man` prints the manual page; `install.sh` installs it, so `man env4ci` works.
 - `env4ci update`: replace the binary with the latest GitHub release after checking it against `checksums.txt`; `--check` only reports. Homebrew / Scoop installs are pointed to their own upgrade command.

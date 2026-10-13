@@ -13,7 +13,7 @@ func AuthKeys(targets []string) []AuthKey {
 	for _, t := range targets {
 		switch t {
 		case "github":
-			out = append(out, AuthKey{"GITHUB_TOKEN", "github: fine-grained token, Secrets + Variables read/write (empty = gh auth token)", "github"})
+			out = append(out, AuthKey{"GITHUB_TOKEN", "github: fine-grained token, Secrets + Variables + Environments read/write (empty = gh auth token)", "github"})
 		case "gitlab":
 			out = append(out,
 				AuthKey{"GITLAB_TOKEN", "gitlab: token with api scope, Maintainer role", "gitlab"},
